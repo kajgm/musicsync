@@ -4,7 +4,7 @@ App to sync philips hue lights and music
 
 A Python-based desktop application for Ubuntu that captures system audio in real-time, extracts frequency bands (Bass, Mids, Highs), syncs with the currently playing Spotify track's album art, and streams the data to Philips Hue lights via the Entertainment API (UDP DTLS) for zero-latency music syncing.
 
-## \u2728 Features
+## ✨ Features
 
 - **Zero-Latency Audio Capture:** Hooks natively into Ubuntu's PulseAudio/PipeWire monitor sinks. No virtual cables required.
 - **Dynamic Color Palettes:** Runs a background thread to poll Spotify for the currently playing track, extracts the dominant colors from the album art, and maps them to your lights.
@@ -13,7 +13,7 @@ A Python-based desktop application for Ubuntu that captures system audio in real
 
 ---
 
-## \U0001f6e0\ufe0f Prerequisites
+## 🛠️ Prerequisites
 
 ### System Requirements
 
@@ -28,7 +28,7 @@ A Python-based desktop application for Ubuntu that captures system audio in real
 
 ---
 
-## \U0001f680 Getting Started
+## 🚀 Getting Started
 
 Follow these steps to set up the project in an isolated Python Virtual Environment (`venv`).
 
@@ -38,7 +38,7 @@ Before setting up Python, you need the underlying C-libraries for audio capture 
 
 ```bash
 sudo apt update
-sudo apt install python3-pyaudio portaudio19-dev libasound2-dev python3-venv pavucontrol
+sudo apt install python3-dev python3-pyaudio portaudio19-dev libasound2-dev python3-venv pavucontrol
 ```
 
 ### 2. Set Up the Virtual Environment
@@ -46,9 +46,6 @@ sudo apt install python3-pyaudio portaudio19-dev libasound2-dev python3-venv pav
 Navigate to your project directory and create the isolated environment:
 
 ```bash
-# Navigate to your project folder
-cd /path/to/your/project
-
 # Create the virtual environment named 'venv'
 python3 -m venv venv
 
@@ -68,7 +65,7 @@ pip install pyaudio numpy spotipy colorthief requests hue-entertainment-pykit py
 
 ---
 
-## \u2699\ufe0f Configuration
+## ⚙️ Configuration
 
 To keep your credentials secure, this project uses a `.env` file.
 
@@ -97,14 +94,14 @@ SPOTIPY_REDIRECT_URI=http://localhost:8888/callback
 
 ```
 
-### \U0001f511 How to get your API Keys:
+### 🔑 How to get your API Keys:
 
 - **Spotify:** Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/), create an app, and copy the Client ID and Client Secret. Ensure you add `http://localhost:8888/callback` as the Redirect URI in the app settings.
 - **Philips Hue:** You will need to generate a username and an Entertainment Client Key by pairing with your Bridge. You can use tools like Postman or simple cURL scripts against the Hue Bridge REST API (`/api/`) pressing the link button on the Bridge to generate these tokens.
 
 ---
 
-## \u25b6\ufe0f Running the Application
+## ▶️ Running the Application
 
 1. Ensure your virtual environment is activated (`source venv/bin/activate`).
 2. Run the script:
@@ -133,11 +130,7 @@ pavucontrol
 
 ---
 
-## \U0001f6d1 Stopping the Sync
-
-To safely stop the stream and turn off the application, press `Ctrl+C` in the terminal.
-
-## \U0001f9f9 Leaving the Virtual Environment
+## 🧹 Leaving the Virtual Environment
 
 When you are done working on the project, you can deactivate the virtual environment to return to your normal system Python:
 

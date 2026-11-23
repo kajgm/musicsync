@@ -1,0 +1,14 @@
+[package]
+name = "loopback"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Phase 0 spike: capture the PC's audio output (WASAPI loopback) as mono f32 PCM on stdout"
+
+[dependencies]
+# Pinned to the release whose WASAPI host is known to switch an output device
+# opened as an input into loopback mode.
+cpal = "=0.15.3"
+
+[profile.release]
+opt-level = 3

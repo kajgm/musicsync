@@ -1,7 +1,7 @@
 // Loopback agent: captures what this PC plays (WASAPI loopback through the native helper),
 // turns it into feature frames (levels, bands, onset strength) and streams them to the
 // musicsync server. Audio is analysed in memory only; none is recorded or sent.
-//   npm run agent -- --url https://musicsync.lab.kajgm.com --token <agent token from Setup>
+//   npm run agent -- --url https://musicsync.example.com --token <agent token from Setup>
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';

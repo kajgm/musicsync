@@ -1,0 +1,8 @@
+{
+  "name": "@musicsync/audio-features",
+  "private": true,
+  "type": "module",
+  "description": "DSP: FFT bands, onset strength, onset picking and gain control. Runs anywhere",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p ." }
+}

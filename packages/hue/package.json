@@ -1,0 +1,9 @@
+{
+  "name": "@musicsync/hue",
+  "private": true,
+  "type": "module",
+  "description": "Hue bridge client: pairing, CLIP v2, Entertainment areas and the DTLS light stream",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "node-dtls-client": "2.0.3" }
+}

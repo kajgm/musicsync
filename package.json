@@ -1,0 +1,30 @@
+{
+  "name": "musicsync",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Hue lights that follow the music: a self-hosted server, a phone-first web app and a PC loopback agent",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "dev:server": "npm run dev -w @musicsync/server",
+    "dev:web": "npm run dev -w @musicsync/web",
+    "agent": "npm start -w @musicsync/sensor-agent --",
+    "hash-password": "node apps/server/src/hash-password.ts",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "vitest run",
+    "build": "npm run build -w @musicsync/web",
+    "start": "node apps/server/src/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}

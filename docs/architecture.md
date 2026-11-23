@@ -345,6 +345,8 @@ Effects always produce the same output for the same time and inputs; random effe
 
 ## 8. Tech stack
 
+Phase 1 swapped or deferred some of these; see [decision 0001](decisions/0001-phase-1-skeleton.md).
+
 | Area | Choice | Why | Also considered |
 |---|---|---|---|
 | Language | **TypeScript** everywhere, plus a ~100-line Rust audio-capture helper | One engine for live output and preview; shared schemas across server, browser and agent; one toolchain for everything with logic in it | **Python**: has the best DSP libraries, but the editor preview would need a second engine or server round-trips, and types would cross over via generated code. **Rust/Go**: not needed for speed (50 Hz × ≤30 channels is trivial) and slower to iterate. A Rust engine compiled to WASM is the fallback if speed ever does matter |
@@ -435,7 +437,7 @@ Every phase ends in something deployable.
 | Phase | Delivers | Done when |
 |---|---|---|
 | **0. Spikes** (done 2026-11-22, all go: [results](../spikes/README.md)) | Three spikes, detailed below: Hue streaming, the Spotify clock and PC loopback | Go/no-go on `node-dtls-client` and the loopback helper; measured clock error on the PC and the phone, capture latency and onset-detection quality |
-| **1. Walking skeleton** | Monorepo, CI, container image and a first deployment. Bridge pairing wizard, Spotify link, engine worker with Hue and simulator outputs, one built-in reactive look, Now Playing and master controls. The loopback agent on your PC | Spotify plays on the PC → the lights react through the deployed app, controlled from the phone |
+| **1. Walking skeleton** (in progress) | Monorepo, CI, container image and a first deployment. Bridge pairing wizard, Spotify link, engine worker with Hue and simulator outputs, one built-in reactive look, Now Playing and master controls. The loopback agent on your PC | Spotify plays on the PC → the lights react through the deployed app, controlled from the phone |
 | **2. Layout** | Floor/room editor, placing the 7 bulbs, tags, groups, a stage, an app-managed Entertainment area, the Unplaced tray, spatial effects | A new bulb joins sync by placing and tagging it |
 | **3. Looks** | Effect library, layer stack, signal bindings, per-light response profiles, palettes (album art and OKLCH), look editor with preview, track/playlist → look rules, automatic start/stop for PC playback | One lamp's response can be tuned without touching the others. Playing Spotify on the PC starts the lights by themselves |
 | **4. Beat grids + Spotify-only mode** | Beat tracker, grids learned automatically from PC playback, tap tempo (editor and Live screen), live beats steering the clock on the PC. Spotify-only mode for phone playback: stand-in signals, softened timing, one-tap start, the phone's speaker offset | Beat effects stay locked through quiet passages. A song played from the phone keeps its beat-synced look if it has been played on the PC before |
@@ -488,6 +490,9 @@ Already decided, no action needed: reuse your existing Spotify Client ID. It was
 | D7 | One container image, deployment-agnostic (one instance, no CPU throttling) | Accepted |
 | D8 | No microphone. PC loopback is the only live audio source; phone playback runs in Spotify-only mode on learned grids | Accepted |
 | D9 | Phones reach the app on the LAN, not through a public tunnel | Accepted |
+| D10 | npm workspaces, with Node 26 running the TypeScript directly; only the web app is built ([0001](decisions/0001-phase-1-skeleton.md)) | Accepted |
+| D11 | `node:sqlite` key-value store with encrypted secrets until relational data arrives ([0001](decisions/0001-phase-1-skeleton.md)) | Accepted |
+| D12 | Plain routes plus the WebSocket live bus until the editors need tRPC ([0001](decisions/0001-phase-1-skeleton.md)) | Accepted |
 
 New or changed decisions each get a short write-up in `docs/decisions/`.
 

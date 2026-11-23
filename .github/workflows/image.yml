@@ -1,0 +1,103 @@
+name: Container image
+
+# PRs: build the image (no push) and smoke-test it.
+# main:  push ghcr.io/kajgm/musicsync:main and :sha-<short>.
+# vX.Y.Z tags: push :X.Y.Z and :X.Y, the tags deployments should pin.
+# Dispatch: run on a tag ref with its version (the Release workflow does this,
+# since tags it pushes don't trigger push events).
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to build, e.g. v0.1.0 (run on that tag)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 lets the image run on a Raspberry Pi too.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
+            type=ref,event=branch
+            type=sha,prefix=sha-
+
+      - id: version
+        run: |
+          v="${{ inputs.version || github.ref_name }}"
+          echo "app=${v#v}" >> "$GITHUB_OUTPUT"
+
+      # Start the amd64 image the way production runs it and check it before publishing.
+      - name: Build amd64 image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: smoke:latest
+          build-args: APP_VERSION=${{ steps.version.outputs.app }}
+          cache-from: type=gha
+
+      # The password hash is for the throwaway password below, used only here.
+      - name: Smoke test
+        run: |
+          set -eu
+          docker run -d --name app --read-only --tmpfs /tmp --tmpfs /data:mode=1777 --user 1000 \
+            -e MUSICSYNC_MASTER_KEY="$(openssl rand -hex 32)" \
+            -e 'ADMIN_PASSWORD_HASH=$2b$10$pqporZW4Uq3UrstI.0IteuVJv/tG74dDcbLi1rESPv.FTfuhyDNu.' \
+            -p 3000:3000 smoke:latest
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:3000/healthz && break
+            sleep 1
+          done
+          curl -fsS http://localhost:3000/healthz | grep -q '"ok":true'
+          curl -fsS http://localhost:3000/ | grep -q '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/agent-token)" = 401
+          curl -fsS -c jar -H 'content-type: application/json' -d '{"password":"smoke-test-password"}' http://localhost:3000/api/login
+          curl -fsS -b jar http://localhost:3000/api/session | grep -q '"signedIn":true'
+          docker logs app
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs app || true
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_VERSION=${{ steps.version.outputs.app }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

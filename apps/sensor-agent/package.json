@@ -1,0 +1,15 @@
+{
+  "name": "@musicsync/sensor-agent",
+  "private": true,
+  "type": "module",
+  "description": "PC loopback agent: captures the PC's audio output and streams audio features (never audio) to the server",
+  "scripts": {
+    "build:native": "cargo build --release --manifest-path native/Cargo.toml",
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@musicsync/audio-features": "*",
+    "@musicsync/protocol": "*"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@musicsync/protocol",
+  "private": true,
+  "type": "module",
+  "description": "Live-bus and sensor protocol messages, validated with Zod",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "zod": "4.6.7" }
+}

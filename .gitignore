@@ -5,4 +5,11 @@ venv/
 
 node_modules/
 target/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Local server data (SQLite) in development
+.data/
+
 spikes/.local/

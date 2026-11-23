@@ -1,139 +1,94 @@
 # musicsync
 
-App to sync philips hue lights and music
+Philips Hue lights that follow the music. A self-hosted server streams to the lights over the Hue Entertainment API at 50 Hz; a phone-first web app controls it; a small agent on the PC that plays Spotify listens to its audio output (loopback, no microphone).
 
-A Python-based desktop application for Ubuntu that captures system audio in real-time, extracts frequency bands (Bass, Mids, Highs), syncs with the currently playing Spotify track's album art, and streams the data to Philips Hue lights via the Entertainment API (UDP DTLS) for zero-latency music syncing.
+- Design: [docs/architecture.md](docs/architecture.md). Phase 0 measurements: [spikes/README.md](spikes/README.md). Decisions: [docs/decisions/](docs/decisions/).
+- v1, the Python desktop app (`main.py`), is documented in [docs/v1.md](docs/v1.md).
 
-## ✨ Features
+**Status: Phase 1, the walking skeleton.** Bridge pairing, Spotify link, the engine worker streaming to Hue, one built-in reactive look ("Pulse"), Now Playing and master controls, and the PC loopback agent.
 
-- **Zero-Latency Audio Capture:** Hooks natively into Ubuntu's PulseAudio/PipeWire monitor sinks. No virtual cables required.
-- **Dynamic Color Palettes:** Runs a background thread to poll Spotify for the currently playing track, extracts the dominant colors from the album art, and maps them to your lights.
-- **Frequency Separation:** Uses Fast Fourier Transform (FFT) to isolate Bass, Mids, and Highs, assigning them to individual lights.
-- **Automatic Gain Control (AGC):** Normalizes audio output so lights react smoothly whether your system volume is at 10% or 100%.
+## Layout
 
----
+| Path | What |
+|---|---|
+| `apps/server` | Fastify server: auth, Hue pairing, Spotify link and polling, the agent's WebSocket, the live bus, and the 50 Hz engine worker |
+| `apps/web` | React web app (installable): Live and Setup |
+| `apps/sensor-agent` | PC loopback agent: a Rust capture helper (`native/`, cpal WASAPI loopback) and a Node process that streams audio features |
+| `packages/engine` | Render engine: the Pulse look, master controls, the flash limiter |
+| `packages/audio-features` | DSP: FFT bands, onset strength, onset picking, gain control |
+| `packages/hue` | Hue bridge client: pairing, CLIP v2, Entertainment areas, the DTLS stream |
+| `packages/spotify` | Spotify Web API: PKCE, token refresh, player state, playback clock |
+| `packages/protocol` | Live-bus and agent messages (Zod) |
 
-## 🛠️ Prerequisites
+npm workspaces; Node 26 runs the TypeScript directly, so only the web app has a build step.
 
-### System Requirements
+## Develop
 
-- **OS:** Ubuntu / Debian Linux
-- **Python:** 3.8 or newer
+Requires Node 26.
 
-### Hardware / Accounts
-
-- **Philips Hue:** A Hue Bridge (v2/Square) and color-capable Hue lights.
-- **Hue App Setup:** You MUST create an **Entertainment Area** in the official Philips Hue app before running this script.
-- **Spotify Premium:** Required to poll the current playback state via the Spotify Web API.
-
----
-
-## 🚀 Getting Started
-
-Follow these steps to set up the project in an isolated Python Virtual Environment (`venv`).
-
-### 1. Install System Dependencies
-
-Before setting up Python, you need the underlying C-libraries for audio capture (PortAudio):
-
-```bash
-sudo apt update
-sudo apt install python3-dev python3-pyaudio portaudio19-dev libasound2-dev python3-venv pavucontrol
+```powershell
+npm install
+npm run typecheck
+npm test
 ```
 
-### 2. Set Up the Virtual Environment
+Run the server with settings in `apps/server/.env` (gitignored):
 
-Navigate to your project directory and create the isolated environment:
-
-```bash
-# Create the virtual environment named 'venv'
-python3 -m venv venv
-
-# Activate the virtual environment
-source venv/bin/activate
+```ini
+MUSICSYNC_MASTER_KEY=<openssl rand -hex 32>
+ADMIN_PASSWORD_HASH=<from npm run hash-password>
+SPOTIFY_CLIENT_ID=<your Spotify app's client ID>
+PUBLIC_URL=http://127.0.0.1:3000
 ```
 
-_(Note: You will know it is active when your terminal prompt starts with `(venv)`)_
-
-### 3. Install Python Packages
-
-With the virtual environment active, install the required Python libraries:
-
-```bash
-pip install pyaudio numpy spotipy colorthief requests hue-entertainment-pykit python-dotenv
+```powershell
+npm run hash-password      # asks for the household password, prints its bcrypt hash
+npm run dev:server         # http://127.0.0.1:3000 (serves apps/web/dist after `npm run build`)
+npm run dev:web            # or: Vite on http://localhost:5173, proxying /api to the server
 ```
 
----
+Data (SQLite) goes to `.data/` unless `DATA_DIR` is set. Spotify only redirects back to HTTPS URLs or loopback IPs, so for local linking add `http://127.0.0.1:3000/api/auth/spotify/callback` to your Spotify app's redirect URIs.
 
-## ⚙️ Configuration
+## Deploy
 
-To keep your credentials secure, this project uses a `.env` file.
+One container image, `ghcr.io/kajgm/musicsync`, built by the **Container image** workflow. Releases: run **Release** from the Actions tab on `main` (it tags `vX.Y.Z` and publishes `:X.Y.Z` and `:X.Y`).
 
-### 1. Create the `.env` file
+| Setting | Contents |
+|---|---|
+| `MUSICSYNC_MASTER_KEY` | 32 random bytes as hex. Encrypts the Hue keys and Spotify tokens in the database, signs sessions |
+| `ADMIN_PASSWORD_HASH` | bcrypt hash of the household password |
+| `SPOTIFY_CLIENT_ID` | From developer.spotify.com (PKCE: no client secret) |
+| `PUBLIC_URL` | The HTTPS URL clients use; the Spotify redirect URI is `<PUBLIC_URL>/api/auth/spotify/callback` |
+| `PORT`, `DATA_DIR` | `3000` and `/data` in the image |
 
-In the root of your project folder, create a file named `.env`:
+What the host must provide (one instance, reach to the bridge on TCP 443 and UDP 2100, a volume at `/data`, a WebSocket-capable HTTPS proxy, no CPU limit) is in [architecture §10](docs/architecture.md#10-deployment).
 
-```bash
-touch .env
+First run: sign in, then on **Setup** pair the bridge (press its link button when asked), link Spotify, and start the agent with the command Setup shows.
+
+## The PC agent
+
+On the Windows PC that plays Spotify:
+
+```powershell
+npm install
+npm run build:native -w @musicsync/sensor-agent    # needs Rust (rustup, GNU toolchain is enough)
+npm run agent -- --url https://<your musicsync host> --token <token from Setup>
 ```
 
-### 2. Populate your credentials
+It sends only levels, bands and onset strength (about 86 small frames a second), never audio. It counts only while Spotify reports playing on a computer, so other sounds can't drive the lights while the music is paused.
 
-Open the `.env` file in your preferred text editor (e.g., `nano .env`) and add the following lines:
+The URL and token can also come from the environment, which keeps the token off the command line:
 
-```env
-# Hue Configuration
-HUE_IP=192.168.X.X
-HUE_USER=your_hue_username_here
-HUE_CLIENT_KEY=your_hue_client_key_here
-
-# Spotify Configuration
-SPOTIPY_CLIENT_ID=your_spotify_client_id_here
-SPOTIPY_CLIENT_SECRET=your_spotify_client_secret_here
-SPOTIPY_REDIRECT_URI=http://localhost:8888/callback
-
+```powershell
+[Environment]::SetEnvironmentVariable('MUSICSYNC_URL', 'https://<your musicsync host>', 'User')
+[Environment]::SetEnvironmentVariable('MUSICSYNC_AGENT_TOKEN', '<token from Setup>', 'User')
 ```
 
-### 🔑 How to get your API Keys:
+To start it hidden at login (not tried yet):
 
-- **Spotify:** Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/), create an app, and copy the Client ID and Client Secret. Ensure you add `http://localhost:8888/callback` as the Redirect URI in the app settings.
-- **Philips Hue:** You will need to generate a username and an Entertainment Client Key by pairing with your Bridge. You can use tools like Postman or simple cURL scripts against the Hue Bridge REST API (`/api/`) pressing the link button on the Bridge to generate these tokens.
-
----
-
-## ▶️ Running the Application
-
-1. Ensure your virtual environment is activated (`source venv/bin/activate`).
-2. Run the script:
-
-```bash
-python hue_sync.py
+```powershell
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$((Get-Command node).Source)`" src\main.ts" -WorkingDirectory "$PWD\apps\sensor-agent"
+Register-ScheduledTask -TaskName 'musicsync agent' -Action $action -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)
 ```
 
-### First-Time Run (Spotify Auth)
-
-On the very first run, the script will open a web browser asking you to log into Spotify and authorize the app. Once authorized, it will create a hidden `.cache` file in your directory to store your token for future use.
-
-### Audio Routing (If lights aren't reacting)
-
-If the script is running but the lights are unresponsive to audio:
-
-1. Open a new terminal tab and launch the PulseAudio Volume Control:
-
-```bash
-pavucontrol
-```
-
-2. Go to the **Recording** tab.
-3. Find the Python `ALSA plug-in` capture stream.
-4. Change its input source from your microphone to **"Monitor of [Your Primary Output Device]"**.
-
----
-
-## 🧹 Leaving the Virtual Environment
-
-When you are done working on the project, you can deactivate the virtual environment to return to your normal system Python:
-
-```bash
-deactivate
-```
+With Windows **Smart App Control** on, freshly built helpers are blocked (`os error 4551`): Windows only runs builds it already trusts.

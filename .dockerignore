@@ -1,0 +1,13 @@
+**/.git
+**/.github
+**/node_modules
+**/dist
+**/target
+**/.data
+**/.env
+**/*.tsbuildinfo
+**/*.test.ts
+docs
+spikes
+apps/sensor-agent/native
+main.py

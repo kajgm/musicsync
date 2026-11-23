@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 export type Config = {
   port: number;
   host: string;
-  /** Origin clients use, e.g. https://musicsync.lab.kajgm.com. Sets the Spotify redirect URI. */
+  /** Origin clients use, e.g. https://musicsync.example.com. Sets the Spotify redirect URI. */
   publicUrl: string;
   dataDir: string;
   webDir: string;

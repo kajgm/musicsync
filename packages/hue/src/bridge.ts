@@ -120,45 +120,164 @@ export async function clip<T>(creds: HueCreds, method: string, resource: string,
 
 export const AREA_NAME = 'musicsync';
 
-export type Area = { id: string; lights: Array<{ channel: number; name: string }> };
+/** `lights[].id`: the entertainment service id of the channel's light. */
+export type Area = { id: string; lights: Array<{ channel: number; name: string; id?: string }> };
+
+/** An area holds at most this many lights. */
+export const AREA_MAX = 10;
+
+/** A light in the area: entertainment service id and position in Hue's −1..1 space (x right, y front, z up). */
+export type Location = { id: string; x: number; y: number; z: number };
+
+export type Device = { id: string; name: string; streamable: boolean };
+
+export type AreaSync = {
+  area: Area;
+  /** Every light on the bridge, by entertainment service id. */
+  devices: Device[];
+};
+
+const sameLocations = (area: EntertainmentConfig, want: Location[]) =>
+  area.channels.length === want.length &&
+  want.every((w) => {
+    const c = area.channels.find((ch) => ch.members[0]?.service.rid === w.id);
+    return c && Math.abs(c.position.x - w.x) < 0.01 && Math.abs(c.position.y - w.y) < 0.01 && Math.abs(c.position.z - w.z) < 0.01;
+  });
 
 /**
- * The app's Entertainment area, created from every entertainment-capable light if it
- * doesn't exist yet. Areas made in the Hue app are left alone.
- * shortcut: lights spread along a line; Phase 2 creates and positions it from the floor plan.
+ * The app's Entertainment area. When `want` (given the bridge's lights) returns locations,
+ * the area's lights and positions are set to them; `beforeChange` runs first so the caller
+ * can stop streaming. Otherwise an existing area is left as it is and a missing one is
+ * made from every streamable light in a line. Areas made in the Hue app are left alone.
  */
-export async function ensureArea(creds: HueCreds): Promise<Area> {
+export async function syncArea(
+  creds: HueCreds,
+  want: (devices: Device[]) => Location[] | undefined = () => undefined,
+  beforeChange: () => Promise<void> = async () => {},
+): Promise<AreaSync> {
   const [lights, services, areas] = await Promise.all([
     clip<Light>(creds, 'GET', 'light'),
     clip<EntertainmentService>(creds, 'GET', 'entertainment'),
     clip<EntertainmentConfig>(creds, 'GET', 'entertainment_configuration'),
   ]);
-  let area = areas.find((a) => a.metadata.name === AREA_NAME);
-  if (!area) {
-    const renderers = services.filter((s) => s.renderer);
-    if (renderers.length === 0) throw new Error('The bridge has no lights that can join an Entertainment area');
-    const xAt = (i: number) => (renderers.length === 1 ? 0 : -1 + (2 * i) / (renderers.length - 1));
-    const [created] = await clip<{ rid: string }>(creds, 'POST', 'entertainment_configuration', {
-      type: 'entertainment_configuration',
-      metadata: { name: AREA_NAME },
-      configuration_type: 'music',
-      locations: {
-        service_locations: renderers
-          .slice(0, 10) // an area holds at most 10 lights
-          .map((s, i) => ({ service: { rid: s.id, rtype: 'entertainment' }, positions: [{ x: xAt(i), y: 0.8, z: 0 }] })),
-      },
-    });
-    if (!created) throw new Error('The bridge returned no id for the new Entertainment area');
-    [area] = await clip<EntertainmentConfig>(creds, 'GET', `entertainment_configuration/${created.rid}`);
-    if (!area) throw new Error('The new Entertainment area disappeared');
-  }
   const nameByDevice = new Map(lights.map((l) => [l.owner.rid, l.metadata.name]));
-  const deviceByService = new Map(services.map((s) => [s.id, s.owner.rid]));
+  const devices = services
+    .filter((s) => nameByDevice.has(s.owner.rid)) // the bridge itself has an entertainment service too
+    .map((s) => ({ id: s.id, name: nameByDevice.get(s.owner.rid)!, streamable: s.renderer }));
+
+  let area = areas.find((a) => a.metadata.name === AREA_NAME);
+  let locations = want(devices);
+  if (!locations && !area) {
+    const renderers = devices.filter((d) => d.streamable).slice(0, AREA_MAX);
+    const xAt = (i: number) => (renderers.length === 1 ? 0 : -1 + (2 * i) / (renderers.length - 1));
+    locations = renderers.map((d, i) => ({ id: d.id, x: xAt(i), y: 0.8, z: 0 }));
+  }
+  if (locations && (!area || !sameLocations(area, locations))) {
+    if (locations.length === 0) throw new Error('The bridge has no lights that can join an Entertainment area');
+    const body = {
+      locations: {
+        service_locations: locations.map((l) => ({
+          service: { rid: l.id, rtype: 'entertainment' },
+          positions: [{ x: l.x, y: l.y, z: l.z }],
+        })),
+      },
+    };
+    let id = area?.id;
+    if (id) {
+      await beforeChange();
+      await clip(creds, 'PUT', `entertainment_configuration/${id}`, body);
+    } else {
+      const [created] = await clip<{ rid: string }>(creds, 'POST', 'entertainment_configuration', {
+        type: 'entertainment_configuration',
+        metadata: { name: AREA_NAME },
+        configuration_type: 'music',
+        ...body,
+      });
+      id = created?.rid;
+      if (!id) throw new Error('The bridge returned no id for the new Entertainment area');
+    }
+    [area] = await clip<EntertainmentConfig>(creds, 'GET', `entertainment_configuration/${id}`);
+    if (!area) throw new Error('The Entertainment area disappeared');
+  }
+  if (!area) throw new Error('No Entertainment area'); // unreachable: made above
+  const nameById = new Map(devices.map((d) => [d.id, d.name]));
   return {
-    id: area.id,
-    lights: area.channels.map((c) => ({
-      channel: c.channel_id,
-      name: nameByDevice.get(deviceByService.get(c.members[0]?.service.rid ?? '') ?? '') ?? `Channel ${c.channel_id}`,
-    })),
+    devices,
+    area: {
+      id: area.id,
+      lights: area.channels.map((c) => {
+        const id = c.members[0]?.service.rid;
+        return { channel: c.channel_id, id, name: (id && nameById.get(id)) || `Channel ${c.channel_id}` };
+      }),
+    },
   };
+}
+
+/**
+ * Follows the bridge's event stream (CLIP v2 SSE) and calls `onChange` when lights are
+ * added, removed or renamed. Reconnects until `stop()` is called.
+ */
+export function watchDevices(creds: HueCreds, onChange: () => void): { stop(): void } {
+  let req: ReturnType<typeof https.request> | undefined;
+  let retry: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const connect = () => {
+    let buffered = '';
+    req = https.request(
+      {
+        host: creds.bridgeIp,
+        port: 443,
+        path: '/eventstream/clip/v2',
+        agent: false,
+        ca: HUE_ROOT_CAS,
+        checkServerIdentity: (_host, cert) =>
+          String([cert.subject?.CN ?? ''].flat()[0] ?? '').toUpperCase() === creds.bridgeId.toUpperCase()
+            ? undefined
+            : new Error(`The certificate at ${creds.bridgeIp} isn't for bridge ${creds.bridgeId}`),
+        headers: { 'hue-application-key': creds.appKey, accept: 'text/event-stream' },
+      },
+      (res) => {
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          buffered += chunk;
+          const lines = buffered.split('\n');
+          buffered = lines.pop() ?? '';
+          for (const line of lines) if (line.startsWith('data:') && isDeviceChange(line.slice(5))) onChange();
+        });
+        res.on('end', () => again());
+      },
+    );
+    req.setTimeout(0);
+    req.on('error', () => again());
+    req.end();
+  };
+  const again = () => {
+    if (stopped) return;
+    clearTimeout(retry);
+    retry = setTimeout(connect, 5000);
+  };
+  connect();
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(retry);
+      req?.destroy();
+    },
+  };
+}
+
+type HueEvent = { type: string; data?: Array<{ type?: string; metadata?: unknown }> };
+
+/** An add or delete of a light/device/entertainment resource, or a rename. Colour changes are not. */
+export function isDeviceChange(json: string): boolean {
+  let events: HueEvent[];
+  try {
+    events = JSON.parse(json) as HueEvent[];
+  } catch {
+    return false;
+  }
+  const kinds = new Set(['light', 'device', 'entertainment']);
+  return events.some((e) =>
+    (e.data ?? []).some((d) => kinds.has(d.type ?? '') && (e.type === 'add' || e.type === 'delete' || d.metadata !== undefined)),
+  );
 }

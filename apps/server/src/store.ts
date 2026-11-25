@@ -1,6 +1,6 @@
 // One SQLite file for settings and secrets. Secrets (Hue keys, Spotify tokens, the agent
 // token) are AES-256-GCM encrypted with the master key, bound to their key name.
-// shortcut: a key-value table; relational tables (and an ORM) arrive with the layout in Phase 2.
+// shortcut: a key-value table (the layout is one document in it, decision 0002); add tables when something needs querying.
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';

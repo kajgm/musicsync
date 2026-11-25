@@ -1,14 +1,20 @@
 // Runs the engine worker (50 Hz render + light output) and restarts it if it dies.
 import { Worker } from 'node:worker_threads';
 import type { FastifyBaseLogger } from 'fastify';
+import type { Position } from '@musicsync/engine';
 import type { HueCreds } from '@musicsync/hue';
 import type { LiveState, Master } from '@musicsync/protocol';
 
 export type HueTarget = { creds: HueCreds; areaId: string; channels: number[] };
 
 export type ToWorker =
-  /** Where frames go: the Hue area, or nowhere but the preview (the simulator). */
-  | { type: 'output'; hue: HueTarget | null; channels: number }
+  /**
+   * Where frames go: the Hue area, or nowhere but the preview (the simulator). `layout` is
+   * each channel's position, or a channel count (lights in a line; 0 = the simulator's 7).
+   */
+  | { type: 'output'; hue: HueTarget | null; layout: number | Position[] }
+  /** Group fader level per channel. */
+  | { type: 'gains'; gains: number[] }
   | { type: 'run'; running: boolean }
   | { type: 'master'; master: Master }
   /** Gain-controlled audio features; `t` is server time (epoch ms) of the audio. */
@@ -28,6 +34,7 @@ export class EngineHost {
   private readonly onMessage: (msg: FromWorker) => void;
   /** The latest settings, replayed into a restarted worker. */
   private readonly latest = new Map<string, ToWorker>();
+  private readonly statusWaiters = new Set<(status: LiveState['output']['status']) => void>();
   private worker: Worker;
   private stopping = false;
 
@@ -39,7 +46,10 @@ export class EngineHost {
 
   private spawn(): Worker {
     const worker = new Worker(new URL('./engine-worker.ts', import.meta.url));
-    worker.on('message', (msg: FromWorker) => this.onMessage(msg));
+    worker.on('message', (msg: FromWorker) => {
+      if (msg.type === 'status') for (const waiter of this.statusWaiters) waiter(msg.status.status);
+      this.onMessage(msg);
+    });
     worker.on('error', (err) => this.log.error({ err }, 'engine worker failed'));
     worker.on('exit', (code) => {
       if (this.stopping) return;
@@ -55,6 +65,27 @@ export class EngineHost {
   send(msg: ToWorker): void {
     if (msg.type !== 'audio') this.latest.set(msg.type, msg);
     this.worker.postMessage(msg);
+  }
+
+  /**
+   * Stops streaming until the next 'output' with a target, so the Entertainment area can
+   * be changed. Resolves once the stream is closed, or after 3 s.
+   */
+  pauseOutput(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.statusWaiters.delete(waiter);
+        resolve();
+      };
+      const waiter = (status: string) => {
+        if (status !== 'streaming' && status !== 'connecting') done();
+      };
+      const timer = setTimeout(done, 3000);
+      this.statusWaiters.add(waiter);
+      const last = this.latest.get('output');
+      this.send({ type: 'output', hue: null, layout: last?.type === 'output' ? last.layout : 0 });
+    });
   }
 
   /** Stops streaming (the bridge gives the lights back) and ends the worker. */

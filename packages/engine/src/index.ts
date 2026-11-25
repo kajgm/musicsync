@@ -1,6 +1,6 @@
-// Render engine, Phase 1: one built-in reactive look ("Pulse"), the master controls and
-// the photosensitivity limiter. Pure TypeScript with no I/O, so it runs in the server's
-// engine worker and later in the browser for previews. Same inputs, same output.
+// Render engine: two built-in spatial looks (Pulse, Wave), the master controls, group
+// faders and the photosensitivity limiter. Pure TypeScript with no I/O, so it runs in the
+// server's engine worker and later in the browser for previews. Same inputs, same output.
 
 export type AudioSignals = {
   /** Loudness, 0..1 after gain control. */
@@ -9,7 +9,7 @@ export type AudioSignals = {
   bass: number;
 };
 
-export type MasterControls = { brightness: number; intensity: number; blackout: boolean };
+export type MasterControls = { brightness: number; intensity: number; blackout: boolean; look?: 'pulse' | 'wave' };
 
 const BASS_ATTACK_MS = 15;
 const BASS_RELEASE_MS = 220;
@@ -92,28 +92,55 @@ export class FlashLimiter {
   }
 }
 
+/** A channel's position seen from the listener, Hue's −1..1 space: x right, y front, z up. */
+export type Position = { x: number; y: number; z: number };
+
+/** Wave: how long a kick takes to ripple from the listener to the farthest light. */
+const WAVE_MS = 260;
+
+const flashAt = (age: number) => (age < 0 ? 0 : Math.exp(-age / FLASH_DECAY_MS));
+
 /**
- * Pulse: hues drift slowly around the room; brightness follows the bass and flashes on
- * kicks, shifting the hue each time. Without audio it breathes slowly instead.
+ * Two looks share the signals. Pulse: hues drift across the room, brightness follows the
+ * bass and every light flashes on a kick, shifting the hue. Wave: the same, but a kick
+ * ripples outward from the listener. Without audio both breathe slowly instead.
  */
 export class Engine {
   readonly channels: number;
   /** The last rendered frame: r, g, b (0..1) per channel. */
   readonly rgb: Float32Array;
   private readonly limiter: FlashLimiter;
+  private readonly pos: Position[];
+  /** Distance from the listener, 0..1. */
+  private readonly dist: Float32Array;
+  /** Per-channel fader (group levels), 0..1. */
+  private readonly gains: Float32Array;
   private lastT: number | undefined;
   private lastAudioT = Number.NEGATIVE_INFINITY;
   private lastFlashT = Number.NEGATIVE_INFINITY;
+  /** The kick before, still rippling outward in Wave. */
+  private prevFlashT = Number.NEGATIVE_INFINITY;
   private bass = 0;
   private bassEnv = 0;
-  private flash = 0;
   private hueShift = 0;
   private audioMix = 0;
 
-  constructor(channels: number) {
-    this.channels = channels;
-    this.rgb = new Float32Array(channels * 3);
-    this.limiter = new FlashLimiter(channels);
+  /** A channel count (lights in a line, left to right) or each channel's position. */
+  constructor(layout: number | Position[]) {
+    this.pos =
+      typeof layout === 'number'
+        ? Array.from({ length: layout }, (_, i) => ({ x: layout === 1 ? 0 : -1 + (2 * i) / (layout - 1), y: 0.8, z: 0 }))
+        : layout;
+    this.channels = this.pos.length;
+    this.rgb = new Float32Array(this.channels * 3);
+    this.limiter = new FlashLimiter(this.channels);
+    this.dist = Float32Array.from(this.pos, (p) => Math.min(1, Math.hypot(p.x, p.y, p.z) / Math.sqrt(3)));
+    this.gains = new Float32Array(this.channels).fill(1);
+  }
+
+  /** Per-channel levels (group faders), in channel order. */
+  setGains(gains: ArrayLike<number>): void {
+    for (let i = 0; i < this.channels; i++) this.gains[i] = clamp01(gains[i] ?? 1);
   }
 
   /** Live audio, already delayed to line up with the speaker. */
@@ -125,8 +152,8 @@ export class Engine {
   /** A detected kick. */
   onset(t: number): void {
     if (t - this.lastFlashT < MIN_FLASH_GAP_MS) return;
+    this.prevFlashT = this.lastFlashT;
     this.lastFlashT = t;
-    this.flash = 1;
     this.hueShift = (this.hueShift + 0.13) % 1;
   }
 
@@ -139,17 +166,20 @@ export class Engine {
     this.audioMix = clamp01(this.audioMix + ((live ? 1 : -1) * dt) / CROSSFADE_MS);
     const attack = this.bass > this.bassEnv ? BASS_ATTACK_MS : BASS_RELEASE_MS;
     this.bassEnv += (this.bass - this.bassEnv) * (1 - Math.exp(-dt / attack));
-    this.flash *= Math.exp(-dt / FLASH_DECAY_MS);
 
     const depth = clamp01(master.intensity);
     const gain = master.blackout ? 0 : clamp01(master.brightness);
-    const react = 0.12 + 0.88 * Math.max(0.8 * this.bassEnv ** 1.5, this.flash);
+    const bassReact = 0.8 * this.bassEnv ** 1.5;
     for (let i = 0; i < this.channels; i++) {
-      const hue = (t / 60_000 + this.hueShift + i * 0.07) % 1;
-      const ambient = 0.3 + 0.12 * Math.sin((2 * Math.PI * t) / 7000 + i * 0.9);
+      const { x, y } = this.pos[i];
+      const delay = master.look === 'wave' ? this.dist[i] * WAVE_MS : 0;
+      const flash = Math.max(flashAt(t - this.lastFlashT - delay), flashAt(t - this.prevFlashT - delay));
+      const react = 0.12 + 0.88 * Math.max(bassReact, flash);
+      const hue = (((t / 60_000 + this.hueShift + 0.2 * (x + 1) + 0.05 * (y + 1)) % 1) + 1) % 1;
+      const ambient = 0.3 + 0.12 * Math.sin((2 * Math.PI * t) / 7000 + 2.6 * (x + 1) + 1.2 * (y + 1));
       const v = lerp(ambient, lerp(ambient, react, depth), this.audioMix);
-      const s = 0.9 - 0.4 * this.flash * depth * this.audioMix;
-      hsvInto(hue, s, v * gain, this.rgb, i * 3);
+      const s = 0.9 - 0.4 * flash * depth * this.audioMix;
+      hsvInto(hue, s, v * gain * this.gains[i], this.rgb, i * 3);
     }
     this.limiter.apply(t, this.rgb);
     return this.rgb;

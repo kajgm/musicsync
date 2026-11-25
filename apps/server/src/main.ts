@@ -6,11 +6,12 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import type { LiveState, Master } from '@musicsync/protocol';
+import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
 import { registerAuth } from './auth.ts';
 import { loadConfig } from './config.ts';
 import { EngineHost } from './engine-host.ts';
 import { HueModule } from './hue.ts';
+import { loadLayout, registerLayout } from './layout.ts';
 import { Live } from './live.ts';
 import { SensorsModule } from './sensors.ts';
 import { SpotifyModule } from './spotify.ts';
@@ -24,12 +25,14 @@ await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
 registerAuth(app, config);
 app.get('/healthz', async () => ({ ok: true, version: config.version }));
 
-const master: Master = store.get<Master>('master') ?? { brightness: 0.8, intensity: 0.8, blackout: false, delayMs: 0 };
+// Settings saved by an older version lack the newer fields.
+const master: Master = { ...DEFAULT_MASTER, ...store.get<Partial<Master>>('master') };
 const initial: LiveState = {
   running: false,
   master,
   mode: 'idle',
-  hue: { paired: false, lights: [] },
+  hue: { paired: false, lights: [], devices: [] },
+  layout: loadLayout(store),
   spotify: {
     configured: Boolean(config.spotifyClientId),
     redirectUri: `${config.publicUrl}/api/auth/spotify/callback`,
@@ -46,6 +49,7 @@ const live = new Live(app, initial, (msg) => {
     store.set('master', next);
     engine.send({ type: 'master', master: next });
     live.patch({ master: next });
+    if (msg.master.groups) hue.sendGains();
   } else {
     engine.send({ type: 'run', running: msg.running });
     live.patch({ running: msg.running });
@@ -58,6 +62,7 @@ const engine = new EngineHost(app.log, (msg) => {
 engine.send({ type: 'master', master });
 
 const hue = new HueModule(app, store, live, engine);
+registerLayout(app, store, live, () => void hue.resync());
 const spotify = new SpotifyModule(app, config, store, live);
 new SensorsModule(app, store, live, engine);
 

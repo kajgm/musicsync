@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import type { LiveState } from '@musicsync/protocol';
+import { LOOKS, stageFixtures, type LiveState, type Master } from '@musicsync/protocol';
+import { LayoutPage, PlanPreview } from './Layout.tsx';
 import { LiveClient } from './live.ts';
 
 async function post(path: string, body?: unknown): Promise<{ ok: boolean; status: number; data: Record<string, string> }> {
@@ -58,8 +59,14 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
   );
 }
 
-function usePage(): 'live' | 'setup' {
-  const read = (): 'live' | 'setup' => (location.hash === '#setup' ? 'setup' : 'live');
+type Page = 'live' | 'layout' | 'setup';
+const PAGES: Record<Page, string> = { live: 'Live', layout: 'Layout', setup: 'Setup' };
+
+function usePage(): Page {
+  const read = (): Page => {
+    const hash = location.hash.slice(1);
+    return hash in PAGES ? (hash as Page) : 'live';
+  };
   const [page, setPage] = useState(read);
   useEffect(() => {
     const onHash = () => setPage(read());
@@ -82,12 +89,11 @@ function Main({ onSignedOut }: { onSignedOut: () => void }) {
       <header>
         <span className="brand">musicsync</span>
         <nav>
-          <a href="#live" aria-current={page === 'live' ? 'page' : undefined}>
-            Live
-          </a>
-          <a href="#setup" aria-current={page === 'setup' ? 'page' : undefined}>
-            Setup
-          </a>
+          {(Object.keys(PAGES) as Page[]).map((p) => (
+            <a key={p} href={`#${p}`} aria-current={page === p ? 'page' : undefined}>
+              {PAGES[p]}
+            </a>
+          ))}
         </nav>
       </header>
       {client && <Pages client={client} page={page} onSignedOut={onSignedOut} />}
@@ -95,12 +101,14 @@ function Main({ onSignedOut }: { onSignedOut: () => void }) {
   );
 }
 
-function Pages({ client, page, onSignedOut }: { client: LiveClient; page: 'live' | 'setup'; onSignedOut: () => void }) {
+function Pages({ client, page, onSignedOut }: { client: LiveClient; page: Page; onSignedOut: () => void }) {
   const { state, connected } = useSyncExternalStore(client.subscribeState, client.getSnapshot);
   return (
     <>
       {!connected && <p className="banner">Connecting to the server…</p>}
-      {state && (page === 'setup' ? <Setup state={state} onSignedOut={onSignedOut} /> : <Live state={state} client={client} />)}
+      {state && page === 'setup' && <Setup state={state} onSignedOut={onSignedOut} />}
+      {state && page === 'layout' && <LayoutPage state={state} client={client} />}
+      {state && page === 'live' && <Live state={state} client={client} />}
     </>
   );
 }
@@ -146,9 +154,23 @@ function Live({ state, client }: { state: LiveState; client: LiveClient }) {
         <p className={`status${state.output.status === 'error' ? ' error' : ''}`} role="status">
           {outputText(state)}
         </p>
-        <Preview client={client} names={hue.lights.map((l) => l.name)} />
+        {hue.lights.some((l) => l.id && stageFixtures(state.layout).some((f) => f.id === l.id)) ? (
+          <PlanPreview client={client} state={state} />
+        ) : (
+          <Preview client={client} names={hue.lights.map((l) => l.name)} />
+        )}
       </section>
       <section className="card">
+        <label className="field">
+          Look
+          <select value={master.look} onChange={(e) => setMaster({ look: e.target.value as Master['look'] })}>
+            {(Object.keys(LOOKS) as Array<Master['look']>).map((look) => (
+              <option key={look} value={look}>
+                {LOOKS[look]}
+              </option>
+            ))}
+          </select>
+        </label>
         <Slider label="Brightness" value={master.brightness} onChange={(brightness) => setMaster({ brightness })} />
         <Slider label="Intensity" value={master.intensity} onChange={(intensity) => setMaster({ intensity })} />
         <Delay value={master.delayMs} onChange={(delayMs) => setMaster({ delayMs })} />
@@ -156,6 +178,18 @@ function Live({ state, client }: { state: LiveState; client: LiveClient }) {
           Blackout
         </button>
       </section>
+      {state.layout.groups.length > 0 && (
+        <section className="card">
+          {state.layout.groups.map((g) => (
+            <Slider
+              key={g.id}
+              label={g.name}
+              value={master.groups[g.id] ?? 1}
+              onChange={(v) => setMaster({ groups: { ...master.groups, [g.id]: v } })}
+            />
+          ))}
+        </section>
+      )}
     </main>
   );
 }

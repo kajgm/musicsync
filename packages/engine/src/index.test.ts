@@ -68,6 +68,33 @@ describe('Engine', () => {
     expect(countRises(levels, 0.25)).toBe(0);
   });
 
+  it('ripples a kick outward in Wave, and all at once in Pulse', () => {
+    const near = { x: 0.1, y: 0.1, z: 0 };
+    const far = { x: 1, y: 1, z: 1 };
+    const peakTimes = (look: 'pulse' | 'wave') => {
+      const engine = new Engine([near, far]);
+      const best = [{ t: 0, v: 0 }, { t: 0, v: 0 }];
+      for (let t = 0; t < 1000; t += 10) {
+        engine.audio(t, { level: 0.2, bass: 0 });
+        if (t === 500) engine.onset(t);
+        const rgb = engine.render(t, { ...master, look });
+        for (const ch of [0, 1]) if (peak(rgb, ch) > best[ch].v) best[ch] = { t, v: peak(rgb, ch) };
+      }
+      return best.map((b) => b.t);
+    };
+    const [pNear, pFar] = peakTimes('pulse');
+    expect(pFar).toBe(pNear);
+    const [wNear, wFar] = peakTimes('wave');
+    expect(wFar - wNear).toBeGreaterThanOrEqual(200);
+  });
+
+  it('scales each channel by its group fader', () => {
+    const engine = new Engine(2);
+    engine.setGains([1, 0.25]);
+    const rgb = engine.render(0, master);
+    expect(peak(rgb, 1)).toBeLessThan(peak(rgb, 0) * 0.5);
+  });
+
   it('breathes without audio', () => {
     const engine = new Engine(1);
     const levels: number[] = [];

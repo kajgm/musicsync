@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PROFILE, Engine, FlashLimiter, type Program } from './index.ts';
+import { DEFAULT_PROFILE, Engine, FlashLimiter, type Program, type ProgramLayer } from './index.ts';
 
 const master = { brightness: 1, intensity: 1, blackout: false };
 const peak = (rgb: Float32Array, ch = 0) => Math.max(rgb[ch * 3], rgb[ch * 3 + 1], rgb[ch * 3 + 2]);
@@ -211,6 +211,55 @@ describe('Engine', () => {
       engine.setBeats(clock);
       engine.setBeats(undefined);
       expect(hits(engine, 0, 2000)).toEqual([]);
+    });
+  });
+
+  describe('show clips', () => {
+    const clip = (window: ProgramLayer['window'], automation?: ProgramLayer['automation']): Program => ({
+      key: 'show',
+      palette: [[0.7, 0, 0]],
+      profiles: [],
+      layers: [{ effect: 'solid', channels: [0], blend: 'normal', opacity: 1, params: { brightness: 1 }, window, automation }],
+    });
+    /** An engine already past the crossfade from its default program. */
+    const showEngine = (program: Program) => {
+      const engine = new Engine(1);
+      engine.render(-1000, master);
+      engine.setProgram(program);
+      return engine;
+    };
+    const levels = (engine: Engine, from: number, to: number) => {
+      const out: number[] = [];
+      for (let t = from; t < to; t += 100) out.push(Math.round(peak(engine.render(t, master)) * 100) / 100);
+      return out;
+    };
+
+    it('draws a clip only inside its window, following the track position', () => {
+      const engine = showEngine(clip({ startMs: 1000, endMs: 1500, fadeInMs: 0, fadeOutMs: 0 }));
+      // The track was at 900 ms at engine time 0.
+      engine.setTrack({ anchorT: 0, anchorPos: 900, playing: true });
+      const v = levels(engine, 0, 800);
+      expect(v.slice(0, 1)).toEqual([0]); // track 900
+      expect(v.slice(1, 6).every((x) => x > 0.5)).toBe(true); // track 1000–1400
+      expect(v.slice(6)).toEqual([0, 0]); // track 1500+
+    });
+
+    it('holds the paused position, and draws nothing without a track', () => {
+      const engine = showEngine(clip({ startMs: 1000, endMs: 1500, fadeInMs: 0, fadeOutMs: 0 }));
+      engine.setTrack({ anchorT: 0, anchorPos: 1200, playing: false });
+      expect(levels(engine, 0, 5000).every((x) => x > 0.5)).toBe(true);
+      engine.setTrack(undefined);
+      expect(levels(engine, 5000, 5300)).toEqual([0, 0, 0]);
+    });
+
+    it('fades in and follows automation keyframes', () => {
+      const engine = showEngine(clip({ startMs: 0, endMs: 10_000, fadeInMs: 400, fadeOutMs: 0 }, { brightness: [[1000, 0.2], [2000, 1]] }));
+      engine.setTrack({ anchorT: 0, anchorPos: 0, playing: true });
+      const v = levels(engine, 0, 2600);
+      expect(v[1]).toBeLessThan(v[4]); // fading in
+      expect(v[10]).toBeLessThan(v[15]); // 0.2 → 1 between 1 s and 2 s
+      expect(v[15]).toBeLessThan(v[20]);
+      expect(v[20]).toBeCloseTo(v[25], 1); // held after the last keyframe
     });
   });
 

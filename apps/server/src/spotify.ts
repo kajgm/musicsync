@@ -10,6 +10,7 @@ import {
   exchangeCode,
   getPlayer,
   getPlaylistName,
+  playerCommand,
   refreshTokens,
   type PlayerState,
   type Tokens,
@@ -100,6 +101,17 @@ export class SpotifyModule {
 
   private patch(update: Partial<LiveState['spotify']>): void {
     this.live.patch({ spotify: { ...this.live.state.spotify, ...update } });
+  }
+
+  /** Play, pause or seek (show editor transport). Errors show on the Spotify status. */
+  async control(action: 'play' | 'pause' | 'seek', ms?: number): Promise<void> {
+    try {
+      const error = await playerCommand(await this.accessToken(), action, ms);
+      this.patch({ error });
+    } catch (err) {
+      this.patch({ error: (err as Error).message });
+    }
+    this.schedule(300); // show the result quickly
   }
 
   private schedule(ms: number): void {

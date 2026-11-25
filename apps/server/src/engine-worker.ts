@@ -2,7 +2,7 @@
 // and the preview. Nothing slow runs on this thread; the control plane sends it settings
 // and audio features as messages.
 import { parentPort } from 'node:worker_threads';
-import { Engine, type BeatClock, type Program } from '@musicsync/engine';
+import { Engine, type BeatClock, type Program, type TrackClock } from '@musicsync/engine';
 import { openHueStream, type HueStream } from '@musicsync/hue';
 import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
 import { now, type FromWorker, type HueTarget, type ToWorker } from './engine-host.ts';
@@ -21,6 +21,7 @@ let master: Master = DEFAULT_MASTER;
 let gains: number[] = [];
 let program: Program | undefined;
 let beats: BeatClock | undefined;
+let track: TrackClock | undefined;
 /** Live audio waits this long (ms) to line up with the speaker. */
 let delayMs = 0;
 /** The engine is rebuilt only when the channel layout changes, so pausing doesn't reset it. */
@@ -99,6 +100,10 @@ port.on('message', (msg: ToWorker) => {
       gains = msg.gains;
       engine.setGains(gains);
       break;
+    case 'track':
+      track = msg.clock;
+      engine.setTrack(track);
+      break;
     case 'beats':
       beats = msg.clock;
       engine.setBeats(beats);
@@ -124,6 +129,7 @@ port.on('message', (msg: ToWorker) => {
         engine.setGains(gains);
         if (program) engine.setProgram(program);
         engine.setBeats(beats);
+        engine.setTrack(track);
       }
       void reconcile();
       break;

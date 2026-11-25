@@ -9,6 +9,7 @@ import websocket from '@fastify/websocket';
 import { DEFAULT_MASTER, Master, type LiveState } from '@musicsync/protocol';
 import { AnalysisModule } from './analysis.ts';
 import { Director } from './director.ts';
+import { Shows } from './shows.ts';
 import { loadLibrary, registerLibrary } from './library.ts';
 import { registerAuth } from './auth.ts';
 import { loadConfig } from './config.ts';
@@ -66,6 +67,8 @@ const live = new Live(app, initial, (msg) => {
   } else if (msg.type === 'taps') {
     const error = analysis.taps(msg.times, msg.sentAt);
     if (error) app.log.info(error);
+  } else if (msg.type === 'transport') {
+    void spotify.control(msg.action, msg.ms);
   } else if (msg.type === 'nudge') {
     analysis.nudge(msg.ms);
   } else {
@@ -81,10 +84,15 @@ engine.send({ type: 'master', master });
 const hue = new HueModule(app, store, live, engine);
 registerLayout(app, store, live, () => void hue.resync());
 registerLibrary(app, store, live);
-const director = new Director(live, engine, app.log);
-director.update();
 const spotify = new SpotifyModule(app, config, store, live);
 const analysis = new AnalysisModule(store, live, engine, app.log);
+const shows = new Shows(app, store, () => director.update());
+const director = new Director(live, engine, app.log, shows, (id) => analysis.gridFor(id));
+director.update();
+app.get('/api/grid/:trackId', async (req) => {
+  const { trackId } = req.params as { trackId: string };
+  return /^[A-Za-z0-9]{1,64}$/.test(trackId) ? (analysis.gridFor(trackId) ?? null) : null;
+});
 new SensorsModule(app, store, live, engine, analysis);
 analysis.update();
 

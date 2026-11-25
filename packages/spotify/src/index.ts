@@ -2,7 +2,7 @@
 // player state and a round-trip-aware playback clock. Only the Player endpoints are used.
 import { createHash, randomBytes } from 'node:crypto';
 
-export const SCOPES = ['user-read-playback-state', 'user-read-currently-playing'];
+export const SCOPES = ['user-read-playback-state', 'user-read-currently-playing', 'user-modify-playback-state'];
 
 export type Tokens = { accessToken: string; refreshToken: string; expiresAt: number; scope?: string };
 
@@ -82,6 +82,20 @@ export type PlayerState = {
     album?: { name: string; images?: Array<{ url: string; width: number | null }> };
   } | null;
 };
+
+/** Play, pause or seek on the active device. Resolves to an error message, or undefined. */
+export async function playerCommand(accessToken: string, action: 'play' | 'pause' | 'seek', ms = 0): Promise<string | undefined> {
+  const path = action === 'seek' ? `seek?position_ms=${Math.max(0, Math.round(ms))}` : action;
+  const res = await fetch(`https://api.spotify.com/v1/me/player/${path}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (res.ok) return undefined;
+  if (res.status === 401 || res.status === 403) return 'Spotify refused: link Spotify again in Setup to let musicsync control playback (needs Premium).';
+  if (res.status === 404) return 'No Spotify device is active. Start playing somewhere first.';
+  return `Spotify ${action} failed: HTTP ${res.status}`;
+}
 
 /** A playlist's name; undefined if Spotify won't say (e.g. someone else's private playlist). */
 export async function getPlaylistName(accessToken: string, uri: string): Promise<string | undefined> {

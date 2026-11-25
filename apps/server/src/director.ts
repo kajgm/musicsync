@@ -1,12 +1,13 @@
-// director module (architecture §6.3): decides which look runs (manual pick > track rule >
-// playlist rule > artist rule > default), compiles it for the current lights and sends it to
-// the engine. Starts the lights when Spotify plays on the PC and stops them after it pauses.
+// director module (architecture §6.3): decides what runs (manual pick > the track's show >
+// track rule > playlist rule > artist rule > default look), compiles it for the current
+// lights and sends it to the engine. Starts the lights when Spotify plays on the PC and stops them after it pauses.
 import type { FastifyBaseLogger } from 'fastify';
-import { DEFAULT_PROFILE, oklchToOklab, type Profile, type Program } from '@musicsync/engine';
-import type { Layout, LiveState, Look, Oklch, ProfilePatch, Target } from '@musicsync/protocol';
+import { DEFAULT_PROFILE, oklchToOklab, type Profile, type Program, type ProgramLayer } from '@musicsync/engine';
+import type { Layout, LiveState, Look, Oklch, ProfilePatch, Show, Target, TimePos } from '@musicsync/protocol';
 import type { EngineHost } from './engine-host.ts';
 import type { Live } from './live.ts';
 import { albumPalette } from './palette.ts';
+import type { Shows } from './shows.ts';
 
 /** Auto-started lights stop this long after the music pauses. */
 const STOP_AFTER_MS = 15_000;
@@ -27,13 +28,13 @@ export function matches(target: Target, id: string | undefined, layout: Layout):
 }
 
 /** A light's response: defaults ← the light's own ← its groups (in order) ← the look's overrides. */
-export function resolveProfile(id: string | undefined, layout: Layout, look: Look): Profile {
+export function resolveProfile(id: string | undefined, layout: Layout, look: Pick<Look, 'overrides'> | undefined): Profile {
   const patches: Array<ProfilePatch | undefined> = [];
   if (id) {
     patches.push(layout.fixtures.find((f) => f.id === id)?.response);
     for (const g of layout.groups) if (g.fixtureIds.includes(id)) patches.push(g.response);
   }
-  for (const o of look.overrides) if (matches(o.target, id, layout)) patches.push(o.response);
+  for (const o of look?.overrides ?? []) if (matches(o.target, id, layout)) patches.push(o.response);
   return Object.assign({}, DEFAULT_PROFILE, ...patches.filter(Boolean));
 }
 
@@ -55,11 +56,52 @@ export function compileLook(look: Look, layout: Layout, ids: Array<string | unde
   };
 }
 
-/** Which look plays, and why. */
-export function pickLook(state: LiveState, manual: string | undefined): { lookId: string; reason: Reason } {
+/**
+ * A show as the engine runs it: the bed look's layers underneath, then each enabled lane's
+ * clips as layers that only draw inside their time window. Beat-snapped times follow the grid.
+ */
+export function compileShow(
+  show: Show,
+  bed: Look | undefined,
+  layout: Layout,
+  ids: Array<string | undefined>,
+  palette: Oklch[],
+  grid: { periodMs: number; offsetMs: number } | undefined,
+  key: string,
+): Program {
+  const at = (p: TimePos) => (p.beat !== undefined && grid ? grid.offsetMs + p.beat * grid.periodMs : p.ms);
+  const base = bed ? compileLook(bed, layout, ids, palette, key) : { key, palette: palette.map(oklchToOklab), profiles: ids.map((id) => resolveProfile(id, layout, undefined)), layers: [] };
+  const clips = show.lanes
+    .filter((lane) => lane.enabled)
+    .flatMap((lane) => {
+      const channels = ids.flatMap((id, i) => (matches(lane.target, id, layout) ? [i] : []));
+      return lane.clips.map((c): ProgramLayer => {
+        const params: ProgramLayer['params'] = {};
+        const automation: NonNullable<ProgramLayer['automation']> = {};
+        for (const [name, v] of Object.entries(c.params)) {
+          if (v && typeof v === 'object' && 'keyframes' in v) automation[name] = v.keyframes.map((k) => [k.ms, k.value]);
+          else params[name] = v as ProgramLayer['params'][string];
+        }
+        return {
+          effect: c.effect,
+          channels,
+          blend: lane.blend,
+          opacity: lane.opacity,
+          params,
+          automation,
+          window: { startMs: at(c.start), endMs: at(c.end), fadeInMs: c.fadeInMs, fadeOutMs: c.fadeOutMs },
+        };
+      });
+    });
+  return { ...base, layers: [...base.layers, ...clips] };
+}
+
+/** What plays, and why. `show`: the playing track's show, if it's enabled. */
+export function pickLook(state: LiveState, manual: string | undefined, show?: Show): { lookId: string; reason: Reason } {
   const { library, spotify } = state;
   const has = (id: string) => library.looks.some((l) => l.id === id);
   if (manual && has(manual)) return { lookId: manual, reason: 'manual' };
+  if (show) return { lookId: show.bedLookId && has(show.bedLookId) ? show.bedLookId : library.defaultLookId, reason: 'show' };
   const track = spotify.track;
   if (track) {
     const find = (kind: string, ok: (uri: string) => boolean) => library.rules.find((r) => r.kind === kind && ok(r.uri) && has(r.lookId));
@@ -87,10 +129,22 @@ export class Director {
   private suppressed = false;
   private stopTimer: NodeJS.Timeout | undefined;
 
-  constructor(live: Live, engine: EngineHost, log: FastifyBaseLogger) {
+  private readonly shows: Pick<Shows, 'get'>;
+  /** The beat grid of a track, for beat-snapped clips. */
+  private readonly grid: (trackId: string) => { periodMs: number; offsetMs: number } | undefined;
+
+  constructor(
+    live: Live,
+    engine: EngineHost,
+    log: FastifyBaseLogger,
+    shows: Pick<Shows, 'get'>,
+    grid: (trackId: string) => { periodMs: number; offsetMs: number } | undefined,
+  ) {
     this.live = live;
     this.engine = engine;
     this.log = log;
+    this.shows = shows;
+    this.grid = grid;
     live.onChange(() => this.update());
   }
 
@@ -125,19 +179,33 @@ export class Director {
     // A manual pick lasts for the track it was made on.
     if (this.manual?.trackId && spotify.track && spotify.track.id !== this.manual.trackId) this.manual = undefined;
 
-    const { lookId, reason } = pickLook(state, this.manual?.lookId);
+    const show = this.shows.get(spotify.track?.id);
+    const playingShow = show?.enabled ? show : undefined;
+    const { lookId, reason } = pickLook(state, this.manual?.lookId, playingShow);
     const look = state.library.looks.find((l) => l.id === lookId)!;
-    let palette = look.palette.colors;
+    const paletteSpec = reason === 'show' ? playingShow!.palette : look.palette;
+    let palette = paletteSpec.colors;
     let paletteKey = 'fixed';
     const thumb = spotify.track?.thumbUrl;
-    if (look.palette.source === 'album' && thumb) {
+    if (paletteSpec.source === 'album' && thumb) {
       const album = this.palettes.get(thumb);
       if (album === undefined) void this.fetchPalette(thumb);
       if (Array.isArray(album)) [palette, paletteKey] = [album, thumb];
     }
 
     const ids = state.hue.lights.length ? state.hue.lights.map((l) => l.id) : new Array<undefined>(SIM_CHANNELS).fill(undefined);
-    const program = compileLook(look, state.layout, ids, palette, `${lookId}|${paletteKey}`);
+    const program =
+      reason === 'show'
+        ? compileShow(
+            playingShow!,
+            playingShow!.bedLookId ? look : undefined,
+            state.layout,
+            ids,
+            palette,
+            this.grid(playingShow!.trackId),
+            `show:${playingShow!.trackId}|${paletteKey}`,
+          )
+        : compileLook(look, state.layout, ids, palette, `${lookId}|${paletteKey}`);
     const json = JSON.stringify(program);
     if (json !== this.sent) {
       this.sent = json;

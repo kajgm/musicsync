@@ -5,14 +5,14 @@ Philips Hue lights that follow the music. A self-hosted server streams to the li
 - Design: [docs/architecture.md](docs/architecture.md). Phase 0 measurements: [spikes/README.md](spikes/README.md). Decisions: [docs/decisions/](docs/decisions/).
 - v1, the Python desktop app (`main.py`), is documented in [docs/v1.md](docs/v1.md).
 
-**Status: Phase 4, beat grids.** Songs played on the PC get a beat grid automatically (or tap one in on Live), so beat effects stay locked through quiet passages and work when the song plays from the phone. Light delay is set per output device. The engine streams to Hue from a floor plan (rooms, placed lights, tags, groups, a listening spot) and follows the PC’s audio through the loopback agent. Looks are layers of effects whose settings follow the music, with palettes (fixed or from the album cover) and per-light response (sensitivity, band, range, smoothing, delay). Rules pick a look per track, playlist or artist, and the lights start by themselves when Spotify plays on the PC.
+**Status: Phase 5, show editor.** Author a light show for a song on a timeline (lanes, clips, keyframes, beat snapping, Spotify as the transport); it plays by itself whenever the song does. Earlier phases: Songs played on the PC get a beat grid automatically (or tap one in on Live), so beat effects stay locked through quiet passages and work when the song plays from the phone. Light delay is set per output device. The engine streams to Hue from a floor plan (rooms, placed lights, tags, groups, a listening spot) and follows the PC’s audio through the loopback agent. Looks are layers of effects whose settings follow the music, with palettes (fixed or from the album cover) and per-light response (sensitivity, band, range, smoothing, delay). Rules pick a look per track, playlist or artist, and the lights start by themselves when Spotify plays on the PC.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `apps/server` | Fastify server: auth, Hue pairing, Spotify link and polling, the agent's WebSocket, the live bus, and the 50 Hz engine worker |
-| `apps/web` | React web app (installable): Live, Looks, Layout and Setup |
+| `apps/web` | React web app (installable): Live, Looks, Shows, Layout and Setup |
 | `apps/sensor-agent` | PC loopback agent: a Rust capture helper (`native/`, cpal WASAPI loopback) and a Node process that streams audio features |
 | `packages/engine` | Render engine: the Pulse look, master controls, the flash limiter |
 | `packages/audio-features` | DSP: FFT bands, onset strength, onset picking, gain control |

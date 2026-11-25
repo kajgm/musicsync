@@ -66,6 +66,8 @@ export const ClientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('nudge'), ms: z.number().int().min(-200).max(200) }),
   /** Forget the current track's beat grid. */
   z.object({ type: z.literal('clearGrid') }),
+  /** Spotify playback control from the show editor. */
+  z.object({ type: z.literal('transport'), action: z.enum(['play', 'pause', 'seek']), ms: z.number().int().min(0).max(36e5).optional() }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -267,6 +269,60 @@ export const Library = z
   });
 export type Library = z.infer<typeof Library>;
 
+// ---- Shows (architecture §4.4): a timeline for one track ----
+
+/** A time in the track. When snapped to the beat grid it also records the beat, and follows the grid if it's refined. */
+export const TimePos = z.object({ ms: z.number().min(0).max(36e5), beat: z.number().min(0).max(1e5).optional() });
+export type TimePos = z.infer<typeof TimePos>;
+/** Keyframes for a number parameter; ms from the clip's start, linear in between. */
+export const Automation = z.object({ keyframes: z.array(z.object({ ms: z.number().min(0).max(36e5), value: z.number() })).min(1).max(200) });
+export type Automation = z.infer<typeof Automation>;
+
+export const Clip = z.object({
+  id: Id,
+  start: TimePos,
+  end: TimePos,
+  effect: z.string().max(40),
+  params: z.record(z.string().max(40), z.union([z.number(), z.string().max(40), Binding, Automation])),
+  fadeInMs: Ms,
+  fadeOutMs: Ms,
+});
+export type Clip = z.infer<typeof Clip>;
+
+export const Lane = z.object({
+  id: Id,
+  name: Name,
+  enabled: z.boolean(),
+  target: Target,
+  blend: z.enum(['normal', 'add', 'max', 'multiply', 'screen']),
+  opacity: Unit,
+  clips: z.array(Clip).max(500),
+});
+export type Lane = z.infer<typeof Lane>;
+
+export const Show = z
+  .object({
+    schemaVersion: z.literal(1),
+    /** Increments on every save; a save based on an older rev is refused. */
+    rev: z.number().int().min(0),
+    /** Spotify track id. */
+    trackId: z.string().regex(/^[A-Za-z0-9]{1,64}$/),
+    track: z.object({ name: z.string().max(300), artists: z.string().max(300), durationMs: z.number().int().min(0).max(36e5) }),
+    name: Name,
+    /** Off: the track's rules and the default look play instead. */
+    enabled: z.boolean(),
+    /** A look underneath the lanes, or none. */
+    bedLookId: Id.nullable(),
+    palette: Look.shape.palette,
+    /** Bottom first. */
+    lanes: z.array(Lane).max(24),
+  })
+  .superRefine((s, ctx) => {
+    for (const lane of s.lanes) for (const c of lane.clips) if (c.end.ms <= c.start.ms) ctx.addIssue({ code: 'custom', message: 'A clip ends before it starts' });
+  });
+export type Show = z.infer<typeof Show>;
+export type ShowSummary = { trackId: string; name: string; track: Show['track']; enabled: boolean; clips: number };
+
 export type Track = {
   id: string;
   name: string;
@@ -319,7 +375,7 @@ export type LiveState = {
   /** What's playing on the lights and why. */
   program: {
     lookId: string;
-    reason: 'manual' | 'track' | 'playlist' | 'artist' | 'default';
+    reason: 'manual' | 'show' | 'track' | 'playlist' | 'artist' | 'default';
     /** The palette in use (the album's colours for an album palette). */
     palette: Oklch[];
     /** Lights started by themselves and stop when the music does. */
@@ -336,6 +392,9 @@ export type LiveState = {
     count?: number;
     /** How far live beats on the PC currently pull the grid (ms). */
     steerMs?: number;
+    /** The grid itself (track time), for snapping in the show editor. */
+    periodMs?: number;
+    offsetMs?: number;
   };
   /** The output device the lights follow now, and its delay. */
   delay: { key: string; label: string; ms: number };

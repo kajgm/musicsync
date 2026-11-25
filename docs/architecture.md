@@ -441,7 +441,7 @@ Every phase ends in something deployable.
 | **2. Layout** (done 2026-11-25, [decision 0002](decisions/0002-phase-2-layout.md)) | Floor/room editor, placing the 7 bulbs, tags, groups, a stage, an app-managed Entertainment area, the Unplaced tray, spatial effects | A new bulb joins sync by placing and tagging it |
 | **3. Looks** (built 2026-11-25, [decision 0003](decisions/0003-phase-3-looks.md)) | Effect library, layer stack, signal bindings, per-light response profiles, palettes (album art and OKLCH), look editor with preview, track/playlist → look rules, automatic start/stop for PC playback | One lamp's response can be tuned without touching the others. Playing Spotify on the PC starts the lights by themselves |
 | **4. Beat grids + Spotify-only mode** (built 2026-11-25, [decision 0004](decisions/0004-phase-4-beats.md)) | Beat tracker, grids learned automatically from PC playback, tap tempo (editor and Live screen), live beats steering the clock on the PC. Spotify-only mode for phone playback: stand-in signals, softened timing, one-tap start, the phone's speaker offset | Beat effects stay locked through quiet passages. A song played from the phone keeps its beat-synced look if it has been played on the PC before |
-| **5. Show editor** | Timeline lanes, clips and automation; beat snapping; transport driven by Spotify (scrubbing seeks the song); floor-plan preview; audition on the real lights; import/export | A song plays its authored show automatically |
+| **5. Show editor** (built 2026-11-25, [decision 0005](decisions/0005-phase-5-shows.md)) | Timeline lanes, clips and automation; beat snapping; transport driven by Spotify (scrubbing seeks the song); floor-plan preview; audition on the real lights; import/export | A song plays its authored show automatically |
 | **Later** | Remote access, capturing only Spotify's process, Linux capture, MIDI/Stream Deck control, Home Assistant hooks, Claude-drafted shows from a track's sections, other brands (WLED, Nanoleaf, LIFX). Past 10 lights, or with bulbs that aren't color-capable: the REST slow path or a second bridge | — |
 
 **Phase 0 detail.** All three spikes run on your PC, which shares the house LAN with the bridge, so they need no network changes:
@@ -494,6 +494,7 @@ Already decided, no action needed: reuse your existing Spotify Client ID. It was
 | D13 | The layout is one versioned document; one stage; the app rewrites its Entertainment area from the plan ([0002](decisions/0002-phase-2-layout.md)) | Accepted |
 | D14 | Looks: OKLCH palettes, sRGB-encoded compositing with an RGB stream, preview on the real lights, one library document ([0003](decisions/0003-phase-3-looks.md)) | Accepted |
 | D15 | Beat grids: one tempo and beat position per track, learned on the PC or tapped; predicted beats; per-device light delays that can go negative for grid beats ([0004](decisions/0004-phase-4-beats.md)) | Accepted |
+| D16 | Shows: one document per track, clips with times that follow the beat grid when snapped, keyframe automation, Spotify as the transport ([0005](decisions/0005-phase-5-shows.md)) | Accepted |
 
 New or changed decisions each get a short write-up in `docs/decisions/`.
 

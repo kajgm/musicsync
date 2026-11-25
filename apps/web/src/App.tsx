@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { stageFixtures, type LiveState, type Rule } from '@musicsync/protocol';
 import { LooksPage, REASONS, css, saveLibrary } from './Looks.tsx';
+import { ShowsPage } from './Shows.tsx';
 import { LayoutPage, PlanPreview } from './Layout.tsx';
 import { LiveClient } from './live.ts';
 
@@ -60,8 +61,8 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
   );
 }
 
-type Page = 'live' | 'looks' | 'layout' | 'setup';
-const PAGES: Record<Page, string> = { live: 'Live', looks: 'Looks', layout: 'Layout', setup: 'Setup' };
+type Page = 'live' | 'looks' | 'shows' | 'layout' | 'setup';
+const PAGES: Record<Page, string> = { live: 'Live', looks: 'Looks', shows: 'Shows', layout: 'Layout', setup: 'Setup' };
 
 function usePage(): Page {
   const read = (): Page => {
@@ -110,6 +111,7 @@ function Pages({ client, page, onSignedOut }: { client: LiveClient; page: Page; 
       {state && page === 'setup' && <Setup state={state} onSignedOut={onSignedOut} />}
       {state && page === 'layout' && <LayoutPage state={state} client={client} />}
       {state && page === 'looks' && <LooksPage state={state} client={client} />}
+      {state && page === 'shows' && <ShowsPage state={state} client={client} />}
       {state && page === 'live' && <Live state={state} client={client} />}
     </>
   );

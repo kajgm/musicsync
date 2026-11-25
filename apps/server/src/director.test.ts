@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_LAYOUT, type Layout, type LiveState } from '@musicsync/protocol';
-import { compileLook, pickLook, resolveProfile } from './director.ts';
+import { ALL, EMPTY_LAYOUT, type Layout, type LiveState, type Show } from '@musicsync/protocol';
+import { compileLook, compileShow, pickLook, resolveProfile } from './director.ts';
 import { BUILTIN_LOOKS, DEFAULT_LIBRARY } from './library.ts';
 import { paletteFromPixels } from './palette.ts';
 
@@ -37,6 +37,63 @@ describe('compileLook', () => {
     const program = compileLook(look, layout, ['lantern', 'lamp', undefined], pulse.palette.colors, 'k');
     expect(program.layers.map((l) => l.channels)).toEqual([[1], [0]]);
     expect(program.profiles[1].band).toBe('mid');
+  });
+});
+
+describe('compileShow', () => {
+  const show: Show = {
+    schemaVersion: 1,
+    rev: 0,
+    trackId: 't1',
+    track: { name: 'Song', artists: 'A', durationMs: 200_000 },
+    name: 'Song show',
+    enabled: true,
+    bedLookId: null,
+    palette: pulse.palette,
+    lanes: [
+      {
+        id: 'l1',
+        name: 'Lamps',
+        enabled: true,
+        target: { tags: ['lamp'], groups: [], fixtures: [] },
+        blend: 'screen',
+        opacity: 0.8,
+        clips: [
+          {
+            id: 'c1',
+            start: { ms: 1000, beat: 4 },
+            end: { ms: 3000 },
+            effect: 'solid',
+            params: { color: 1, brightness: { keyframes: [{ ms: 0, value: 0 }, { ms: 500, value: 1 }] } },
+            fadeInMs: 100,
+            fadeOutMs: 0,
+          },
+        ],
+      },
+      { id: 'off', name: 'Off', enabled: false, target: ALL, blend: 'normal', opacity: 1, clips: [] },
+    ],
+  };
+
+  it('turns clips into windowed, automated layers on their lane’s lights', () => {
+    const program = compileShow(show, undefined, layout, ['lantern', 'lamp'], pulse.palette.colors, undefined, 'k');
+    expect(program.layers).toHaveLength(1);
+    const [clip] = program.layers;
+    expect(clip.channels).toEqual([1]);
+    expect(clip.window).toEqual({ startMs: 1000, endMs: 3000, fadeInMs: 100, fadeOutMs: 0 });
+    expect(clip.params).toEqual({ color: 1 });
+    expect(clip.automation).toEqual({ brightness: [[0, 0], [500, 1]] });
+  });
+
+  it('places beat-snapped times on the grid, with the bed look underneath', () => {
+    const program = compileShow(show, pulse, layout, ['lantern', 'lamp'], pulse.palette.colors, { periodMs: 500, offsetMs: 120 }, 'k');
+    expect(program.layers.map((l) => l.effect)).toEqual(['wash', 'flash', 'solid']);
+    expect(program.layers[2].window?.startMs).toBe(120 + 4 * 500);
+  });
+
+  it('wins over rules but not over a manual pick', () => {
+    const state = { library: DEFAULT_LIBRARY, spotify: {} } as unknown as LiveState;
+    expect(pickLook(state, undefined, show).reason).toBe('show');
+    expect(pickLook(state, 'wave', show).reason).toBe('manual');
   });
 });
 

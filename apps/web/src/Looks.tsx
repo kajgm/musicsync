@@ -21,6 +21,7 @@ const BLENDS: Record<LookLayer['blend'], string> = {
 const CURVES: Record<Curve, string> = { linear: 'Even', exp: 'Punchy', log: 'Gentle' };
 export const REASONS: Record<LiveState['program']['reason'], string> = {
   manual: 'picked by you for this track',
+  show: 'this song’s show',
   track: 'set for this track',
   playlist: 'set for this playlist',
   artist: 'set for this artist',
@@ -189,7 +190,8 @@ function NameField({ value, onCommit }: { value: string; onCommit: (v: string) =
   );
 }
 
-function PaletteEditor({ look, live, setLook }: { look: Look; live?: Oklch[]; setLook: (fn: (l: Look) => Look, soon?: boolean) => void }) {
+/** Edits the palette of a look or a show. */
+export function PaletteEditor<T extends { palette: Look['palette'] }>({ look, live, setLook }: { look: T; live?: Oklch[]; setLook: (fn: (l: T) => T, soon?: boolean) => void }) {
   const [sel, setSel] = useState(0);
   const colors = look.palette.colors;
   const i = Math.min(sel, colors.length - 1);
@@ -334,7 +336,7 @@ function LayerEditor({
   );
 }
 
-function ParamEditor({
+export function ParamEditor({
   spec,
   value,
   palette,

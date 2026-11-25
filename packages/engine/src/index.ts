@@ -86,6 +86,10 @@ export type ProgramLayer = {
   opacity: number;
   /** By parameter name: a number, an enum option key, or a binding. Missing = the default. */
   params: Record<string, number | string | Binding>;
+  /** A show clip: drawn only from start to end of the track (ms), fading in and out. */
+  window?: { startMs: number; endMs: number; fadeInMs: number; fadeOutMs: number };
+  /** Number params following keyframes: [ms from the window start, value], sorted by time. */
+  automation?: Record<string, Array<[number, number]>>;
 };
 
 /**
@@ -100,6 +104,9 @@ export type BeatClock = {
   /** Ramp hits in instead of jumping (phone playback, where the speaker delay is a guess). */
   soft: boolean;
 };
+
+/** The playing track's position: anchorPos (ms) at engine time anchorT, moving while playing. */
+export type TrackClock = { anchorT: number; anchorPos: number; playing: boolean };
 
 export type Program = {
   /** Same key = the same look edited (applied at once); a new key crossfades. */
@@ -135,6 +142,17 @@ const follow = (cur: number, target: number, dt: number, attack: number, release
   const tau = target > cur ? attack : release;
   return tau <= 0 ? target : cur + (target - cur) * (1 - Math.exp(-dt / tau));
 };
+
+/** Linear interpolation through keyframes (ms sorted); held flat before the first and after the last. */
+function keyframeAt(ms: Float64Array, val: Float64Array, at: number): number {
+  const n = ms.length;
+  if (at <= ms[0]) return val[0];
+  if (at >= ms[n - 1]) return val[n - 1];
+  let i = 1;
+  while (ms[i] < at) i++;
+  const k = (at - ms[i - 1]) / (ms[i] - ms[i - 1] || 1);
+  return val[i - 1] + (val[i] - val[i - 1]) * k;
+}
 
 /** The Pulse look's palette: six even hues. */
 export const RAINBOW: Oklch[] = [20, 80, 150, 220, 280, 330].map((h) => ({ l: 0.72, c: 0.14, h }));
@@ -225,6 +243,8 @@ type Layer = {
   binds: Array<{ index: number; signal: number; lo: number; hi: number; curve: Curve; attackMs: number; releaseMs: number }>;
   /** Smoothed bound values: binds × channels. */
   env: Float64Array;
+  window: ProgramLayer['window'];
+  autos: Array<{ index: number; ms: Float64Array; val: Float64Array }>;
 };
 
 type Compiled = { key: string; palette: Palette; layers: Layer[]; lastT: number | undefined };
@@ -240,6 +260,7 @@ function compile(program: Program, pos: Position[], dist: Float32Array): Compile
     const names = Object.keys(def.params);
     const stat = new Float64Array(names.length);
     const binds: Layer['binds'] = [];
+    const autos: Layer['autos'] = [];
     names.forEach((name, index) => {
       const ps = def.params[name];
       const v = spec.params[name];
@@ -255,6 +276,11 @@ function compile(program: Program, pos: Position[], dist: Float32Array): Compile
         stat[index] = clamp(v.range[0]);
       } else {
         stat[index] = ps.default;
+      }
+      const keys = ps.kind === 'number' ? spec.automation?.[name] : undefined;
+      if (ps.kind === 'number' && keys?.length) {
+        const sorted = [...keys].sort((a, b) => a[0] - b[0]);
+        autos.push({ index, ms: Float64Array.from(sorted, (k) => k[0]), val: Float64Array.from(sorted, (k) => Math.min(ps.max, Math.max(ps.min, k[1]))) });
       }
     });
     // Positions relative to this layer's lights: 0..1 along each axis.
@@ -282,6 +308,8 @@ function compile(program: Program, pos: Position[], dist: Float32Array): Compile
       stat,
       binds,
       env: new Float64Array(binds.length * channels.length),
+      window: spec.window,
+      autos,
     });
   }
   return { key: program.key, palette: new Palette(program.palette), layers, lastT: undefined };
@@ -317,6 +345,7 @@ export class Engine {
   private lastT: number | undefined;
   private lastAudioT = Number.NEGATIVE_INFINITY;
   private beats: BeatClock | undefined;
+  private track: TrackClock | undefined;
   /** The last beat that produced a stand-in kick. */
   private standInBeat = Number.NEGATIVE_INFINITY;
   private lastFlashT = Number.NEGATIVE_INFINITY;
@@ -362,6 +391,11 @@ export class Engine {
       channel: 0,
       palette: this.current.palette,
     };
+  }
+
+  /** The playing track's position (for show clips), or undefined with no track. */
+  setTrack(clock: TrackClock | undefined): void {
+    this.track = clock;
   }
 
   /** Where the beats fall, or undefined when there's no beat to follow. */
@@ -538,6 +572,19 @@ export class Engine {
         const h = this.slot(t, trim);
         ctx.t = t - trim;
         ctx.channel = c;
+        // A show clip only draws inside its time window, fading in and out.
+        let fade = 1;
+        let rel = 0;
+        const win = layer.window;
+        if (win) {
+          const track = this.track;
+          if (!track) continue;
+          const pos = track.playing ? track.anchorPos + ctx.t - track.anchorT : track.anchorPos;
+          if (pos < win.startMs || pos >= win.endMs) continue;
+          rel = pos - win.startMs;
+          if (win.fadeInMs > 0) fade = Math.min(fade, rel / win.fadeInMs);
+          if (win.fadeOutMs > 0) fade = Math.min(fade, (win.endMs - pos) / win.fadeOutMs);
+        }
         const sens = Math.min(1, this.profile(c).sensitivity);
         ctx.trigT[0] = this.hOnset[h * 3];
         ctx.trigPrev[0] = this.hOnset[h * 3 + 1];
@@ -573,10 +620,11 @@ export class Engine {
           layer.env[e] = dt === 0 ? target : follow(layer.env[e], target, dt, bind.attackMs, bind.releaseMs);
           p[bind.index] = layer.env[e];
         }
+        for (const auto of layer.autos) p[auto.index] = keyframeAt(auto.ms, auto.val, rel);
         const tmp = this.tmp;
         layer.def.render(ctx, p, tmp, 0);
         const o = c * 3;
-        const k = layer.opacity;
+        const k = layer.opacity * fade;
         for (let i = 0; i < 3; i++) {
           const a = out[o + i];
           const v = tmp[i];

@@ -620,3 +620,152 @@ details[open] > summary {
   font-weight: 400;
   font-size: 0.8rem;
 }
+
+/* ---- Shows ---- */
+
+@media (min-width: 900px) {
+  .app:has(main.shows) {
+    max-width: 1200px;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand {
+    display: none;
+  }
+
+  nav a {
+    padding: 6px 8px;
+  }
+}
+
+label.button {
+  cursor: pointer;
+}
+
+.transport {
+  align-items: center;
+}
+
+.transport .time {
+  font-variant-numeric: tabular-nums;
+  min-width: 5.5rem;
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.timeline {
+  position: relative;
+  min-width: 100%;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.ruler {
+  position: relative;
+  height: 26px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.ruler span {
+  position: absolute;
+  top: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding-left: 3px;
+  border-left: 1px solid var(--line);
+}
+
+.lane {
+  position: relative;
+  height: 48px;
+  border-bottom: 1px solid var(--line);
+  cursor: copy;
+}
+
+.lane.selected {
+  background: rgba(106, 168, 255, 0.06);
+}
+
+.lane.disabled {
+  opacity: 0.45;
+}
+
+.lane-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 2px 6px;
+  pointer-events: none;
+  background: var(--bg);
+  border-bottom-right-radius: 6px;
+}
+
+.clip {
+  position: absolute;
+  top: 18px;
+  height: 26px;
+  border-radius: 6px;
+  background: #2f4f86;
+  border: 1px solid #4a72b8;
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 24px;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: grab;
+  z-index: 1;
+}
+
+.clip.selected {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.clip .handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.beatline {
+  position: absolute;
+  top: 26px;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--danger);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.keyframe {
+  border-top: 1px dashed var(--line);
+  padding-top: 4px;
+}
+
+.shows .plan {
+  max-height: 320px;
+}

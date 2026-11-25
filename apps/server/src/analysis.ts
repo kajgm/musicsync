@@ -17,9 +17,18 @@ const SAVE_EVERY_MS = 30_000;
 const MAX_STEER_MS = 150;
 const BEATS_PER_BAR = 4;
 
-type StoredGrid = { learned?: GridFit; tapped?: GridFit };
+/** `nudgeMs` moves the learned grid; kept apart so learning from later plays doesn't undo it. */
+type StoredGrid = { learned?: GridFit; tapped?: GridFit; nudgeMs?: number };
 
 const mod = (x: number, m: number) => ((x % m) + m) % m;
+
+/** The grid the lights follow: tapped, else learned plus its nudge. `nudge: false` gives the learned grid as heard. */
+function effectiveGrid(s: StoredGrid, nudge = true): (GridFit & { source: 'tapped' | 'learned' }) | undefined {
+  if (s.tapped) return { ...s.tapped, source: 'tapped' };
+  if (!s.learned) return undefined;
+  const offsetMs = nudge ? mod(s.learned.offsetMs + (s.nudgeMs ?? 0), s.learned.periodMs) : s.learned.offsetMs;
+  return { ...s.learned, offsetMs, source: 'learned' };
+}
 /** Signed distance from x to the nearest multiple of m, in (−m/2, m/2]. */
 const wrap = (x: number, m: number) => mod(x + m / 2, m) - m / 2;
 
@@ -64,12 +73,6 @@ export class AnalysisModule {
     return spotify.progressMs + (spotify.playing ? t - spotify.at : 0);
   }
 
-  private grid(): (GridFit & { source: 'tapped' | 'learned' }) | undefined {
-    if (this.stored.tapped) return { ...this.stored.tapped, source: 'tapped' };
-    if (this.stored.learned) return { ...this.stored.learned, source: 'learned' };
-    return undefined;
-  }
-
   /** Onset strength from the PC's audio (only while it counts, see sensors). */
   frame(flux: number, t: number): void {
     const est = this.tracker.push(flux, t);
@@ -78,9 +81,10 @@ export class AnalysisModule {
     const pos = this.position(est.anchorT);
     if (state.mode !== 'full' || !state.spotify.playing || !state.spotify.track || pos === undefined) return this.update();
     this.obs.push({ periodMs: est.periodMs, posMs: pos, weight: est.confidence });
-    const grid = this.grid();
+    const grid = effectiveGrid(this.stored, false);
     if (grid && Math.abs(est.periodMs / grid.periodMs - 1) < 0.04) {
       // Live beats steer the clock: how far the heard beat is from where the grid puts it.
+      // Against the un-nudged grid, so steering doesn't pull the lights back from a nudge.
       const err = wrap(pos - grid.offsetMs - this.steer, grid.periodMs);
       if (Math.abs(err) < grid.periodMs / 4) this.steer = Math.max(-MAX_STEER_MS, Math.min(MAX_STEER_MS, this.steer + 0.2 * err));
     }
@@ -104,11 +108,10 @@ export class AnalysisModule {
   }
 
   nudge(ms: number): void {
-    const g = this.stored.tapped ? 'tapped' : this.stored.learned ? 'learned' : undefined;
-    if (!g) return;
-    const grid = this.stored[g]!;
-    this.stored = { ...this.stored, [g]: { ...grid, offsetMs: mod(grid.offsetMs + ms, grid.periodMs) } };
-    if (g === 'learned') this.base = this.stored.learned;
+    const { tapped, learned, nudgeMs = 0 } = this.stored;
+    if (tapped) this.stored = { ...this.stored, tapped: { ...tapped, offsetMs: mod(tapped.offsetMs + ms, tapped.periodMs) } };
+    else if (learned) this.stored = { ...this.stored, nudgeMs: nudgeMs + ms };
+    else return;
     this.persist();
     this.update();
   }
@@ -116,7 +119,7 @@ export class AnalysisModule {
   /** A track's beat grid (tapped, else learned), for beat-snapped show clips. */
   gridFor(trackId: string): { periodMs: number; offsetMs: number } | undefined {
     const stored = trackId === this.trackId ? this.stored : this.store.get<StoredGrid>(`grid:${trackId}`);
-    const g = stored?.tapped ?? stored?.learned;
+    const g = stored && effectiveGrid(stored);
     return g && { periodMs: g.periodMs, offsetMs: g.offsetMs };
   }
 
@@ -170,7 +173,7 @@ export class AnalysisModule {
     // The beat clock: grid + playback position, or the live tracker before there's a grid.
     let clock: BeatClock | undefined;
     let beat: LiveState['beat'] = { source: 'none' };
-    const grid = this.grid();
+    const grid = effectiveGrid(this.stored);
     const est = this.tracker.estimate;
     const playing = state.spotify.playing && state.spotify.at !== undefined && state.spotify.progressMs !== undefined;
     const steer = state.mode === 'full' ? this.steer : 0;

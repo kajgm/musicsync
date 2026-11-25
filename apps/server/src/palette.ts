@@ -5,7 +5,6 @@ import { decodeSrgb, linearToOklab, oklabToOklch, type Oklab } from '@musicsync/
 import type { Oklch } from '@musicsync/protocol';
 
 const MAX_BYTES = 512 * 1024;
-const CACHE = 100;
 
 /** Up to `k` colours from RGBA pixels, sorted by hue; undefined if the image is mostly grey. */
 export function paletteFromPixels(rgba: Uint8Array, k = 5): Oklch[] | undefined {
@@ -54,11 +53,8 @@ export function paletteFromPixels(rgba: Uint8Array, k = 5): Oklch[] | undefined 
   return out.length ? out : undefined;
 }
 
-const cache = new Map<string, Oklch[] | undefined>();
-
-/** The palette of a Spotify cover image, cached by URL. Only Spotify's image CDN is fetched. */
+/** The palette of a Spotify cover image (the director caches it by URL). Only Spotify's image CDN is fetched. */
 export async function albumPalette(url: string): Promise<Oklch[] | undefined> {
-  if (cache.has(url)) return cache.get(url);
   const host = new URL(url).hostname;
   if (!url.startsWith('https://') || !(host.endsWith('.scdn.co') || host.endsWith('.spotifycdn.com'))) return undefined;
   const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
@@ -66,8 +62,5 @@ export async function albumPalette(url: string): Promise<Oklch[] | undefined> {
   const bytes = new Uint8Array(await res.arrayBuffer());
   if (bytes.length > MAX_BYTES) throw new Error('Cover image too large');
   const image = jpeg.decode(bytes, { useTArray: true, maxResolutionInMP: 2, maxMemoryUsageInMB: 64 });
-  const palette = paletteFromPixels(image.data);
-  if (cache.size >= CACHE) cache.delete(cache.keys().next().value!);
-  cache.set(url, palette);
-  return palette;
+  return paletteFromPixels(image.data);
 }

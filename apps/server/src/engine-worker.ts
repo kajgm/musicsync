@@ -143,7 +143,7 @@ port.on('message', (msg: ToWorker) => {
 
 // Fixed-rate loop. Each tick renders for the current time and is scheduled against the
 // start, so timer jitter shifts a frame by a few ms but never accumulates.
-const start = performance.now();
+let start = performance.now();
 let frames = 0;
 let statsFrom = start;
 let statsFrames = 0;
@@ -170,6 +170,10 @@ function tick(): void {
     [statsFrom, statsFrames] = [performance.now(), 0];
     setStatus(status);
   }
-  setTimeout(tick, Math.max(0, start + (frames * 1000) / HZ - performance.now()));
+  let wait = start + (frames * 1000) / HZ - performance.now();
+  // More than a frame behind (a stall): move the schedule on instead of sending the
+  // missed frames to the bridge in one burst.
+  if (wait < -1000 / HZ) [start, wait] = [start + 1000 / HZ - wait, 1000 / HZ];
+  setTimeout(tick, Math.max(0, wait));
 }
 tick();

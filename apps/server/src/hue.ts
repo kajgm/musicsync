@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { Position } from '@musicsync/engine';
 import { AREA_MAX, pair, syncArea, watchDevices, type HueCreds, type Location } from '@musicsync/hue';
 import { stageFixtures, stageSpace, type LiveState } from '@musicsync/protocol';
-import type { EngineHost, HueTarget } from './engine-host.ts';
+import type { EngineHost } from './engine-host.ts';
 import type { Live } from './live.ts';
 import type { Store } from './store.ts';
 
@@ -24,7 +24,6 @@ export class HueModule {
   private debounce: NodeJS.Timeout | undefined;
   private queue: Promise<void> = Promise.resolve();
   private lights: LiveState['hue']['lights'] = [];
-  private target: HueTarget | undefined;
 
   constructor(app: FastifyInstance, store: Store, live: Live, engine: EngineHost) {
     this.store = store;
@@ -113,14 +112,9 @@ export class HueModule {
       const byId = new Map(locations.map((l) => [l.id, l]));
       const positions = area.lights.map((l) => (l.id ? byId.get(l.id) : undefined));
       const channels = area.lights.map((l) => l.channel);
-      // The worker restarts the stream when the target object changes, so reuse an equal one.
-      const old = this.target;
-      if (!old || old.creds !== creds || old.areaId !== area.id || old.channels.join() !== channels.join()) {
-        this.target = { creds, areaId: area.id, channels };
-      }
       this.engine.send({
         type: 'output',
-        hue: this.target!,
+        hue: { creds, areaId: area.id, channels },
         layout: positions.every(Boolean) ? (positions as Position[]) : area.lights.length,
       });
       this.sendGains();

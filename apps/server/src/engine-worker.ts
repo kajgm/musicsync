@@ -119,7 +119,8 @@ port.on('message', (msg: ToWorker) => {
       void reconcile();
       break;
     case 'output': {
-      target = msg.hue;
+      // Messages arrive as copies, so compare by value: an equal target keeps the stream open.
+      if (JSON.stringify(msg.hue) !== JSON.stringify(target)) target = msg.hue;
       const key = JSON.stringify(msg.layout);
       if (key !== layoutKey) {
         layoutKey = key;

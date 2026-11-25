@@ -119,7 +119,7 @@ function Pages({ client, page, onSignedOut }: { client: LiveClient; page: Page; 
 
 const MODE_TEXT: Record<LiveState['mode'], string> = {
   full: 'Following the PC’s audio',
-  'spotify-only': 'Spotify-only: no live audio from this device yet',
+  'spotify-only': 'Phone playback: the lights follow the song’s beat grid',
   idle: 'Waiting for music',
 };
 
@@ -172,7 +172,7 @@ function LookPicker({ state, client }: { state: LiveState; client: LiveClient })
         </div>
       )}
       <p className="hint">
-        This is {REASONS[program.reason]}.{program.auto && ' The lights started by themselves and stop when the music does.'}{' '}
+        This is {REASONS[program.reason]}.{program.auto && ' They stop by themselves when the music does.'}{' '}
         {program.reason === 'manual' && (
           <button className="link" onClick={() => client.send({ type: 'look', lookId: null })}>
             Back to the rules
@@ -224,10 +224,11 @@ function Live({ state, client }: { state: LiveState; client: LiveClient }) {
         )}
       </section>
       <LookPicker state={state} client={client} />
+      <Beat state={state} client={client} />
       <section className="card">
         <Slider label="Brightness" value={master.brightness} onChange={(brightness) => setMaster({ brightness })} />
         <Slider label="Intensity" value={master.intensity} onChange={(intensity) => setMaster({ intensity })} />
-        <Delay value={master.delayMs} onChange={(delayMs) => setMaster({ delayMs })} />
+        <Delay state={state} setMaster={setMaster} />
         <button className={`toggle${master.blackout ? ' on' : ''}`} aria-pressed={master.blackout} onClick={() => setMaster({ blackout: !master.blackout })}>
           Blackout
         </button>
@@ -338,21 +339,87 @@ function Slider({ label, value, onChange }: { label: string; value: number; onCh
   );
 }
 
-function Delay({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const set = (v: number) => onChange(Math.max(0, Math.min(1000, v)));
+/** The light delay for the output device playing now (each device keeps its own). */
+function Delay({ state, setMaster }: { state: LiveState; setMaster: (m: Partial<LiveState['master']>) => void }) {
+  const { delay, master } = state;
+  const set = (v: number) => setMaster({ delays: { ...master.delays, [delay.key]: Math.max(-300, Math.min(1000, v)) } });
   return (
-    <div className="field">
-      <span id="delay-label">Light delay</span>
-      <div className="stepper" role="group" aria-labelledby="delay-label">
-        <button aria-label="10 ms earlier" onClick={() => set(value - 10)}>
-          −
-        </button>
-        <output aria-live="polite">{value} ms</output>
-        <button aria-label="10 ms later" onClick={() => set(value + 10)}>
-          +
-        </button>
+    <div className="stack">
+      <div className="field">
+        <span id="delay-label">Light delay</span>
+        <div className="stepper" role="group" aria-labelledby="delay-label">
+          <button aria-label="10 ms earlier" onClick={() => set(delay.ms - 10)}>
+            −
+          </button>
+          <output aria-live="polite">{delay.ms} ms</output>
+          <button aria-label="10 ms later" onClick={() => set(delay.ms + 10)}>
+            +
+          </button>
+        </div>
       </div>
+      <p className="hint">
+        For {delay.label}.{delay.ms < 0 && ' Below 0 only moves beats from the song’s grid earlier; live audio can’t be early.'}
+      </p>
     </div>
+  );
+}
+
+const BEAT_TEXT: Record<LiveState['beat']['source'], string> = {
+  tapped: 'from your taps',
+  learned: 'learned from the PC',
+  live: 'heard live on the PC (no grid for this song yet)',
+  none: '',
+};
+
+/** The beat for this song, a tap button to set it, and nudges. */
+function Beat({ state, client }: { state: LiveState; client: LiveClient }) {
+  const { beat, spotify } = state;
+  const taps = useRef<number[]>([]);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [count, setCount] = useState(0);
+  const send = () => {
+    if (taps.current.length >= 8) client.send({ type: 'taps', times: taps.current.slice(-64), sentAt: performance.now() });
+    taps.current = [];
+    setCount(0);
+  };
+  const tap = () => {
+    taps.current.push(performance.now());
+    setCount(taps.current.length);
+    clearTimeout(timer.current);
+    // A pause of 2 s ends the taps; 16 is plenty.
+    if (taps.current.length >= 16) send();
+    else timer.current = setTimeout(send, 2000);
+  };
+  const grid = beat.source === 'tapped' || beat.source === 'learned';
+  return (
+    <section className="card">
+      <h2>Beat</h2>
+      <p className="hint" role="status">
+        {beat.source === 'none'
+          ? spotify.track
+            ? 'No beat for this song yet. Play it on the PC and it learns one, or tap along below.'
+            : 'Play a song to follow its beat.'
+          : `${Math.round(beat.bpm ?? 0)} BPM, ${BEAT_TEXT[beat.source]}${beat.source === 'learned' && beat.count ? ` (${beat.count} beats)` : ''}.${
+              beat.steerMs ? ` The PC’s audio pulls it ${beat.steerMs > 0 ? '+' : ''}${beat.steerMs} ms.` : ''
+            }`}
+      </p>
+      <button className="big tap" disabled={!spotify.playing} onClick={tap}>
+        {count === 0 ? 'Tap along to the beat' : count < 8 ? `${count}… keep going` : `${count} taps: stop to save`}
+      </button>
+      {grid && (
+        <div className="row wrap">
+          <button onClick={() => client.send({ type: 'nudge', ms: -10 })}>10 ms earlier</button>
+          <button onClick={() => client.send({ type: 'nudge', ms: 10 })}>10 ms later</button>
+          <button
+            onClick={() => {
+              if (confirm('Forget this song’s beat grid?')) client.send({ type: 'clearGrid' });
+            }}
+          >
+            Forget
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

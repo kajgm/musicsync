@@ -49,6 +49,17 @@ export const BUILTIN_LOOKS: Look[] = [
     overrides: [],
   },
   {
+    id: 'beat',
+    name: 'Beat',
+    palette: { source: 'album', colors: RAINBOW },
+    layers: [
+      layer('wash', 'wash', 'normal', { stepOn: 'bar', kickStep: 0.25, brightness: bass(0.15, 0.7) }),
+      layer('flash', 'flash', 'screen', { on: 'beat', strength: 0.5, decayMs: 180 }),
+      layer('sweep', 'sweep', 'add', { on: 'bar', color: -1, durationMs: 600 }, 0.7),
+    ],
+    overrides: [],
+  },
+  {
     id: 'ambient',
     name: 'Ambient',
     palette: { source: 'album', colors: RAINBOW },

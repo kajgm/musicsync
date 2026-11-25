@@ -25,12 +25,17 @@ export type EffectContext = {
   t: number;
   /** Position within the layer's lights, 0..1 per axis (0.5 when all are level). */
   axis: Record<Axis, number>;
-  /** Kicks so far, and when the last two happened as this channel sees them. */
-  onsets: number;
-  onsetT: number;
-  prevOnsetT: number;
-  /** How much kicks should show: intensity × live audio, 0..1. */
-  react: number;
+  /**
+   * Per trigger (TRIGGER_KEYS order: kick, beat, bar): when the last two happened as this
+   * channel sees them, and how many so far.
+   */
+  trigT: Float64Array;
+  trigPrev: Float64Array;
+  trigCount: Float64Array;
+  /** Per trigger, how much a hit should show, 0..1 (intensity; for kicks also live audio). */
+  trigReact: Float64Array;
+  /** Hits ramp up over this long instead of jumping (softened timing on phone playback). */
+  softMs: number;
   /** Index of the channel in the whole frame (for seeded randomness). */
   channel: number;
   palette: Palette;
@@ -87,6 +92,21 @@ export class Palette {
 
 /** A kick's light: 1 at the kick, then decaying; 0 before it. */
 export const decay = (age: number, ms: number) => (age < 0 ? 0 : Math.exp(-age / ms));
+
+export const TRIGGERS = { kick: 'Kicks', beat: 'Every beat', bar: 'Every bar' } as const;
+export type Trigger = keyof typeof TRIGGERS;
+export const TRIGGER_KEYS = Object.keys(TRIGGERS) as Trigger[];
+export const triggerParam = (def: Trigger = 'kick', label = 'On'): ParamSpec => ({ kind: 'enum', label, options: TRIGGERS, default: def });
+
+/**
+ * How lit a hit of trigger `i` is now: 1 at the event (ramping over `softMs` when timing is
+ * softened), then decaying; the previous event still fades out. Scaled by its react.
+ */
+export function hit(ctx: EffectContext, i: number, decayMs: number, delayMs = 0): number {
+  const soft = ctx.softMs;
+  const env = (age: number) => (age < 0 ? 0 : age < soft ? age / soft : Math.exp(-(age - soft) / decayMs));
+  return ctx.trigReact[i] * Math.max(env(ctx.t - ctx.trigT[i] - delayMs), env(ctx.t - ctx.trigPrev[i] - delayMs));
+}
 
 /** Deterministic 0..1 noise from two integers (mulberry32 step). */
 export function hash01(a: number, b: number): number {

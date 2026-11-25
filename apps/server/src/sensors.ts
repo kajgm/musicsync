@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { Agc, OnsetPicker, bassAmplitude, highAmplitude, midAmplitude } from '@musicsync/audio-features';
 import { AgentMessage, type AgentFrame, type LiveState, type ServerToAgent } from '@musicsync/protocol';
 import { now, type EngineHost } from './engine-host.ts';
+import type { AnalysisModule } from './analysis.ts';
 import type { Live } from './live.ts';
 import type { Store } from './store.ts';
 
@@ -16,11 +17,13 @@ type Agcs = Record<'level' | 'bass' | 'mid' | 'high', Agc>;
 export class SensorsModule {
   private readonly live: Live;
   private readonly engine: EngineHost;
+  private readonly analysis: AnalysisModule;
   private readonly token: string;
   private current: { close(code: number, reason: string): void } | undefined;
   private frames = 0;
 
-  constructor(app: FastifyInstance, store: Store, live: Live, engine: EngineHost) {
+  constructor(app: FastifyInstance, store: Store, live: Live, engine: EngineHost, analysis: AnalysisModule) {
+    this.analysis = analysis;
     this.live = live;
     this.engine = engine;
     let token: string | undefined;
@@ -110,6 +113,8 @@ export class SensorsModule {
     const bass = agc.bass.push(bassAmplitude(f.bands), f.t);
     const mid = agc.mid.push(midAmplitude(f.bands), f.t);
     const high = agc.high.push(highAmplitude(f.bands), f.t);
-    if (this.audioAllowed()) this.engine.send({ type: 'audio', t: f.t, level, bass, mid, high, onset });
+    if (!this.audioAllowed()) return;
+    this.engine.send({ type: 'audio', t: f.t, level, bass, mid, high, onset });
+    this.analysis.frame(f.flux, f.t);
   }
 }

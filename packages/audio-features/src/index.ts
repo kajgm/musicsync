@@ -224,3 +224,6 @@ export const bassAmplitude = (bands: ArrayLike<number>) => bandAmplitude(bands, 
 /** Mids (320–2560 Hz) and highs (2.5–16 kHz). */
 export const midAmplitude = (bands: ArrayLike<number>) => bandAmplitude(bands, 3, 6);
 export const highAmplitude = (bands: ArrayLike<number>) => bandAmplitude(bands, 6, 8);
+
+export * from './beats.ts';
+export * from './grid.ts';

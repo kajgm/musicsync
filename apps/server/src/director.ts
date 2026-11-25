@@ -81,7 +81,7 @@ export class Director {
   /** Cover URL → palette (null: none or failed; undefined entry: not fetched yet). */
   private readonly palettes = new Map<string, Oklch[] | null | 'pending'>();
   private sent = '';
-  /** The running lights were started automatically. */
+  /** The running lights stop by themselves when the music does. */
   private auto = false;
   /** Stopped by hand while the music played: don't restart until it stops. */
   private suppressed = false;
@@ -94,10 +94,14 @@ export class Director {
     live.onChange(() => this.update());
   }
 
-  /** Start/Stop from the Live screen. */
+  /**
+   * Start/Stop from the Live screen. Started while Spotify plays on another device (the
+   * phone), the lights stop by themselves when it pauses, like auto-started ones.
+   */
   run(running: boolean): void {
-    if (!running && this.live.state.spotify.playing) this.suppressed = true;
-    this.setRunning(running, false);
+    const { spotify, mode } = this.live.state;
+    if (!running && spotify.playing) this.suppressed = true;
+    this.setRunning(running, running && mode === 'spotify-only');
   }
 
   /** A look picked on the Live screen (null: back to the rules). */

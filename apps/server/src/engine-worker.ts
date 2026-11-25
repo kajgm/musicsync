@@ -2,7 +2,7 @@
 // and the preview. Nothing slow runs on this thread; the control plane sends it settings
 // and audio features as messages.
 import { parentPort } from 'node:worker_threads';
-import { Engine, type Program } from '@musicsync/engine';
+import { Engine, type BeatClock, type Program } from '@musicsync/engine';
 import { openHueStream, type HueStream } from '@musicsync/hue';
 import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
 import { now, type FromWorker, type HueTarget, type ToWorker } from './engine-host.ts';
@@ -20,6 +20,9 @@ let engine = new Engine(SIM_CHANNELS);
 let master: Master = DEFAULT_MASTER;
 let gains: number[] = [];
 let program: Program | undefined;
+let beats: BeatClock | undefined;
+/** Live audio waits this long (ms) to line up with the speaker. */
+let delayMs = 0;
 /** The engine is rebuilt only when the channel layout changes, so pausing doesn't reset it. */
 let layoutKey = '0';
 let target: HueTarget | null = null;
@@ -96,6 +99,13 @@ port.on('message', (msg: ToWorker) => {
       gains = msg.gains;
       engine.setGains(gains);
       break;
+    case 'beats':
+      beats = msg.clock;
+      engine.setBeats(beats);
+      break;
+    case 'delay':
+      delayMs = Math.max(0, msg.ms);
+      break;
     case 'program':
       program = msg.program;
       engine.setProgram(program);
@@ -113,6 +123,7 @@ port.on('message', (msg: ToWorker) => {
         engine = new Engine(layout === 0 || (Array.isArray(layout) && layout.length === 0) ? SIM_CHANNELS : layout);
         engine.setGains(gains);
         if (program) engine.setProgram(program);
+        engine.setBeats(beats);
       }
       void reconcile();
       break;
@@ -132,9 +143,9 @@ let statsFrom = start;
 let statsFrames = 0;
 function tick(): void {
   const t = now();
-  while (audio.length && audio[0].t + master.delayMs <= t) {
+  while (audio.length && audio[0].t + delayMs <= t) {
     const a = audio.shift()!;
-    const at = a.t + master.delayMs;
+    const at = a.t + delayMs;
     engine.audio(at, a);
     if (a.onset) engine.onset(at);
   }

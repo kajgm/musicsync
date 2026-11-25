@@ -5,7 +5,7 @@ Philips Hue lights that follow the music. A self-hosted server streams to the li
 - Design: [docs/architecture.md](docs/architecture.md). Phase 0 measurements: [spikes/README.md](spikes/README.md). Decisions: [docs/decisions/](docs/decisions/).
 - v1, the Python desktop app (`main.py`), is documented in [docs/v1.md](docs/v1.md).
 
-**Status: Phase 3, looks.** The engine streams to Hue from a floor plan (rooms, placed lights, tags, groups, a listening spot) and follows the PC’s audio through the loopback agent. Looks are layers of effects whose settings follow the music, with palettes (fixed or from the album cover) and per-light response (sensitivity, band, range, smoothing, delay). Rules pick a look per track, playlist or artist, and the lights start by themselves when Spotify plays on the PC.
+**Status: Phase 4, beat grids.** Songs played on the PC get a beat grid automatically (or tap one in on Live), so beat effects stay locked through quiet passages and work when the song plays from the phone. Light delay is set per output device. The engine streams to Hue from a floor plan (rooms, placed lights, tags, groups, a listening spot) and follows the PC’s audio through the loopback agent. Looks are layers of effects whose settings follow the music, with palettes (fixed or from the album cover) and per-light response (sensitivity, band, range, smoothing, delay). Rules pick a look per track, playlist or artist, and the lights start by themselves when Spotify plays on the PC.
 
 ## Layout
 

@@ -34,6 +34,9 @@ export const SIGNALS = {
   'audio.onset': 'Kick (fades)',
   'lfo.slow': 'Slow wave (8 s)',
   'lfo.fast': 'Fast wave (2 s)',
+  'beat.pulse': 'Beat (pulse)',
+  'beat.phase': 'Beat (ramp)',
+  'bar.phase': 'Bar (ramp)',
 } as const;
 export type SignalName = keyof typeof SIGNALS;
 
@@ -85,6 +88,19 @@ export type ProgramLayer = {
   params: Record<string, number | string | Binding>;
 };
 
+/**
+ * Where the beats fall, in engine time: from the track's beat grid and the playback clock,
+ * or straight from the live beat tracker.
+ */
+export type BeatClock = {
+  periodMs: number;
+  /** Time of a downbeat (the first beat of a bar). */
+  anchorT: number;
+  beatsPerBar: number;
+  /** Ramp hits in instead of jumping (phone playback, where the speaker delay is a guess). */
+  soft: boolean;
+};
+
 export type Program = {
   /** Same key = the same look edited (applied at once); a new key crossfades. */
   key: string;
@@ -105,6 +121,8 @@ const MIN_FLASH_GAP_MS = 333;
 /** Signal history kept for per-light latency trims: 64 frames ≈ 1.3 s at 50 Hz. */
 const HISTORY = 64;
 const AUDIO_ONSET_MS = 140;
+const BEAT_PULSE_MS = 180;
+const SOFT_MS = 60;
 
 const BLENDS: Blend[] = ['normal', 'add', 'max', 'multiply', 'screen'];
 const SIGNAL_KEYS = Object.keys(SIGNALS) as SignalName[];
@@ -298,6 +316,9 @@ export class Engine {
   private readonly smooth = new Float64Array(4);
   private lastT: number | undefined;
   private lastAudioT = Number.NEGATIVE_INFINITY;
+  private beats: BeatClock | undefined;
+  /** The last beat that produced a stand-in kick. */
+  private standInBeat = Number.NEGATIVE_INFINITY;
   private lastFlashT = Number.NEGATIVE_INFINITY;
   private prevFlashT = Number.NEGATIVE_INFINITY;
   private onsets = 0;
@@ -330,7 +351,28 @@ export class Engine {
     this.current = compile(defaultProgram(n), this.pos, this.dist);
     const axis = {} as Record<Axis, number>;
     for (const k of AXIS_KEYS) axis[k] = 0;
-    this.ctx = { t: 0, axis, onsets: 0, onsetT: 0, prevOnsetT: 0, react: 0, channel: 0, palette: this.current.palette };
+    this.ctx = {
+      t: 0,
+      axis,
+      trigT: new Float64Array(3),
+      trigPrev: new Float64Array(3),
+      trigCount: new Float64Array(3),
+      trigReact: new Float64Array(3),
+      softMs: 0,
+      channel: 0,
+      palette: this.current.palette,
+    };
+  }
+
+  /** Where the beats fall, or undefined when there's no beat to follow. */
+  setBeats(clock: BeatClock | undefined): void {
+    this.beats = clock && clock.periodMs > 0 ? clock : undefined;
+  }
+
+  /** Beat number at time t (beat 0 is the anchor), or NaN without a beat clock. */
+  private beatAt(t: number): number {
+    const b = this.beats;
+    return b ? Math.floor((t - b.anchorT) / b.periodMs) : Number.NaN;
   }
 
   /** Runs a program. Same key: applied at once (a live edit). New key: crossfades. */
@@ -382,8 +424,24 @@ export class Engine {
   render(t: number, master: MasterControls): Float32Array {
     const dt = this.lastT === undefined ? 0 : Math.max(0, t - this.lastT);
     this.lastT = t;
-    const live = t - this.lastAudioT < AUDIO_TIMEOUT_MS;
-    if (!live) this.input.fill(0);
+    let live = t - this.lastAudioT < AUDIO_TIMEOUT_MS;
+    if (!live && this.beats) {
+      // No live audio but a beat to follow (phone playback): beats stand in for kicks and bass.
+      live = true;
+      const n = this.beatAt(t);
+      const beatT = this.beats.anchorT + n * this.beats.periodMs;
+      if (n !== this.standInBeat) {
+        this.standInBeat = n;
+        this.onset(beatT);
+      }
+      const pulse = decay(t - beatT, BEAT_PULSE_MS);
+      this.input[0] = 0.55;
+      this.input[1] = 0.3 + 0.7 * pulse;
+      this.input[2] = 0.45 + 0.25 * pulse;
+      this.input[3] = 0.45;
+    } else if (!live) {
+      this.input.fill(0);
+    }
     this.audioMix = clamp01(this.audioMix + ((live ? 1 : -1) * dt) / CROSSFADE_MS);
     for (let b = 0; b < 4; b++) this.smooth[b] = follow(this.smooth[b], this.input[b], dt, AUDIO_ATTACK_MS, AUDIO_RELEASE_MS);
     this.intensity = clamp01(master.intensity);
@@ -446,6 +504,14 @@ export class Engine {
     const name = SIGNAL_KEYS[signal];
     if (name === 'lfo.slow') return 0.5 + 0.5 * Math.sin((2 * Math.PI * t) / 8000);
     if (name === 'lfo.fast') return 0.5 + 0.5 * Math.sin((2 * Math.PI * t) / 2000);
+    const beats = this.beats;
+    if (name === 'beat.phase' || name === 'bar.phase' || name === 'beat.pulse') {
+      if (!beats) return 0;
+      const x = (t - beats.anchorT) / beats.periodMs;
+      if (name === 'beat.phase') return x - Math.floor(x);
+      if (name === 'bar.phase') return x / beats.beatsPerBar - Math.floor(x / beats.beatsPerBar);
+      return clamp01(decay((x - Math.floor(x)) * beats.periodMs, BEAT_PULSE_MS) * this.intensity * pr.sensitivity);
+    }
     const react = this.intensity * this.hMix[h] * pr.sensitivity;
     if (name === 'audio.onset') {
       const on = Math.max(decay(t - this.hOnset[h * 3], AUDIO_ONSET_MS), decay(t - this.hOnset[h * 3 + 1], AUDIO_ONSET_MS));
@@ -472,10 +538,29 @@ export class Engine {
         const h = this.slot(t, trim);
         ctx.t = t - trim;
         ctx.channel = c;
-        ctx.onsetT = this.hOnset[h * 3];
-        ctx.prevOnsetT = this.hOnset[h * 3 + 1];
-        ctx.onsets = this.hOnset[h * 3 + 2];
-        ctx.react = this.intensity * this.hMix[h] * Math.min(1, this.profile(c).sensitivity);
+        const sens = Math.min(1, this.profile(c).sensitivity);
+        ctx.trigT[0] = this.hOnset[h * 3];
+        ctx.trigPrev[0] = this.hOnset[h * 3 + 1];
+        ctx.trigCount[0] = this.hOnset[h * 3 + 2];
+        ctx.trigReact[0] = this.intensity * this.hMix[h] * sens;
+        const b = this.beats;
+        if (b) {
+          const n = this.beatAt(ctx.t);
+          const bar = Math.floor(n / b.beatsPerBar);
+          ctx.trigT[1] = b.anchorT + n * b.periodMs;
+          ctx.trigPrev[1] = ctx.trigT[1] - b.periodMs;
+          ctx.trigCount[1] = n;
+          ctx.trigT[2] = b.anchorT + bar * b.beatsPerBar * b.periodMs;
+          ctx.trigPrev[2] = ctx.trigT[2] - b.beatsPerBar * b.periodMs;
+          ctx.trigCount[2] = bar;
+          ctx.trigReact[1] = ctx.trigReact[2] = this.intensity * sens;
+          ctx.softMs = b.soft ? SOFT_MS : 0;
+        } else {
+          ctx.trigT[1] = ctx.trigT[2] = ctx.trigPrev[1] = ctx.trigPrev[2] = Number.NEGATIVE_INFINITY;
+          ctx.trigCount[1] = ctx.trigCount[2] = 0;
+          ctx.trigReact[1] = ctx.trigReact[2] = 0;
+          ctx.softMs = 0;
+        }
         for (let a = 0; a < 5; a++) ctx.axis[AXIS_KEYS[a]] = layer.axes[j * 5 + a];
         p.set(layer.stat);
         for (let b = 0; b < layer.binds.length; b++) {

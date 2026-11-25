@@ -43,20 +43,29 @@ export const Master = z.object({
   /** How strongly the lights react to the music; 0 = steady ambient light. */
   intensity: z.number().min(0).max(1),
   blackout: z.boolean(),
-  /** Delays the lights behind the captured audio, set by ear for the speaker. */
-  delayMs: z.number().int().min(0).max(1000),
+  /**
+   * Light delay per output device (see LiveState.delay for the current one), set by ear.
+   * Negative = beats from the grid fire early; live audio can only be delayed.
+   */
+  delays: z.record(z.string().max(220), z.number().int().min(-300).max(1000)),
   /** Fader level per group id; a light in several groups gets the product. Missing = 1. */
   groups: z.record(z.string().max(64), z.number().min(0).max(1)),
 });
 export type Master = z.infer<typeof Master>;
 
-export const DEFAULT_MASTER: Master = { brightness: 0.8, intensity: 0.8, blackout: false, delayMs: 0, groups: {} };
+export const DEFAULT_MASTER: Master = { brightness: 0.8, intensity: 0.8, blackout: false, delays: {}, groups: {} };
 
 export const ClientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('master'), master: Master.partial() }),
   z.object({ type: z.literal('run'), running: z.boolean() }),
   /** Play this look for the current track (overriding rules), or go back to the rules (null). */
   z.object({ type: z.literal('look'), lookId: z.string().min(1).max(64).nullable() }),
+  /** Taps along to the beat, in the client's clock (ms), and that clock when sent. */
+  z.object({ type: z.literal('taps'), times: z.array(z.number()).min(8).max(64), sentAt: z.number() }),
+  /** Move the current track's beat grid earlier (−) or later (+). */
+  z.object({ type: z.literal('nudge'), ms: z.number().int().min(-200).max(200) }),
+  /** Forget the current track's beat grid. */
+  z.object({ type: z.literal('clearGrid') }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -316,6 +325,20 @@ export type LiveState = {
     /** Lights started by themselves and stop when the music does. */
     auto: boolean;
   };
+  /** The beat the lights follow for the current track. */
+  beat: {
+    /** tapped / learned: the track's grid. live: the PC's audio, no grid yet. none: no beat. */
+    source: 'tapped' | 'learned' | 'live' | 'none';
+    bpm?: number;
+    /** 0..1. */
+    confidence?: number;
+    /** Beats the learned grid rests on. */
+    count?: number;
+    /** How far live beats on the PC currently pull the grid (ms). */
+    steerMs?: number;
+  };
+  /** The output device the lights follow now, and its delay. */
+  delay: { key: string; label: string; ms: number };
   agent: { connected: boolean; device?: string; framesPerSec?: number };
   output: { status: 'off' | 'connecting' | 'streaming' | 'error' | 'no-bridge'; fps: number; error?: string };
 };

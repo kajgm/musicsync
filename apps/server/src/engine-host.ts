@@ -1,7 +1,7 @@
 // Runs the engine worker (50 Hz render + light output) and restarts it if it dies.
 import { Worker } from 'node:worker_threads';
 import type { FastifyBaseLogger } from 'fastify';
-import type { Position, Program } from '@musicsync/engine';
+import type { BeatClock, Position, Program } from '@musicsync/engine';
 import type { HueCreds } from '@musicsync/hue';
 import type { LiveState, Master } from '@musicsync/protocol';
 
@@ -19,6 +19,10 @@ export type ToWorker =
   | { type: 'master'; master: Master }
   /** The look to run, compiled for the current channels. */
   | { type: 'program'; program: Program }
+  /** Where the beats fall (undefined: no beat to follow). */
+  | { type: 'beats'; clock?: BeatClock }
+  /** Live audio waits this long before it reaches the lights (≥ 0). */
+  | { type: 'delay'; ms: number }
   /** Gain-controlled audio features; `t` is server time (epoch ms) of the audio. */
   | { type: 'audio'; t: number; level: number; bass: number; mid: number; high: number; onset: boolean }
   | { type: 'shutdown' };

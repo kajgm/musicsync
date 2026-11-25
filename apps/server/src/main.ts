@@ -7,6 +7,7 @@ import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { DEFAULT_MASTER, Master, type LiveState } from '@musicsync/protocol';
+import { AnalysisModule } from './analysis.ts';
 import { Director } from './director.ts';
 import { loadLibrary, registerLibrary } from './library.ts';
 import { registerAuth } from './auth.ts';
@@ -39,6 +40,8 @@ const initial: LiveState = {
   layout: loadLayout(store),
   library,
   program: { lookId: library.defaultLookId, reason: 'default', palette: [], auto: false },
+  beat: { source: 'none' },
+  delay: { key: 'none', label: 'the next device that plays', ms: 0 },
   spotify: {
     configured: Boolean(config.spotifyClientId),
     redirectUri: `${config.publicUrl}/api/auth/spotify/callback`,
@@ -58,8 +61,15 @@ const live = new Live(app, initial, (msg) => {
     if (msg.master.groups) hue.sendGains();
   } else if (msg.type === 'run') {
     director.run(msg.running);
-  } else {
+  } else if (msg.type === 'look') {
     director.pick(msg.lookId);
+  } else if (msg.type === 'taps') {
+    const error = analysis.taps(msg.times, msg.sentAt);
+    if (error) app.log.info(error);
+  } else if (msg.type === 'nudge') {
+    analysis.nudge(msg.ms);
+  } else {
+    analysis.clearGrid();
   }
 });
 const engine = new EngineHost(app.log, (msg) => {
@@ -74,7 +84,9 @@ registerLibrary(app, store, live);
 const director = new Director(live, engine, app.log);
 director.update();
 const spotify = new SpotifyModule(app, config, store, live);
-new SensorsModule(app, store, live, engine);
+const analysis = new AnalysisModule(store, live, engine, app.log);
+new SensorsModule(app, store, live, engine, analysis);
+analysis.update();
 
 if (existsSync(config.webDir)) await app.register(fastifyStatic, { root: config.webDir });
 else app.log.warn(`No web app at ${config.webDir}: run \`npm run build\` (or use \`npm run dev:web\`)`);

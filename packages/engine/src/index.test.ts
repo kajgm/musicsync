@@ -153,6 +153,67 @@ describe('Engine', () => {
     for (let i = 1; i < levels.length; i++) expect(Math.abs(levels[i] - levels[i - 1])).toBeLessThan(0.1);
   });
 
+  describe('beats', () => {
+    const clock = { periodMs: 500, anchorT: 0, beatsPerBar: 4, soft: false };
+    const flashOn = (on: string): Program => ({
+      key: on,
+      palette: [[0.7, 0.1, 0]],
+      profiles: [],
+      layers: [{ effect: 'flash', channels: [0], blend: 'normal', opacity: 1, params: { on, decayMs: 60 } }],
+    });
+    /** Times (ms) at which the light rises sharply. */
+    const hits = (engine: Engine, from: number, to: number, audio?: (t: number) => void) => {
+      const out: number[] = [];
+      let prev = 0;
+      for (let t = from; t < to; t += 10) {
+        audio?.(t);
+        const v = peak(engine.render(t, master));
+        if (v - prev > 0.3) out.push(t);
+        prev = v;
+      }
+      return out;
+    };
+
+    it('keeps flashing on the beat through a quiet passage', () => {
+      const engine = new Engine(1);
+      engine.setProgram(flashOn('beat'));
+      engine.setBeats(clock);
+      // Live audio that goes silent (level 0, no kicks) for the second half.
+      const times = hits(engine, 0, 4000, (t) => engine.audio(t, { level: t < 2000 ? 0.8 : 0, bass: t < 2000 ? 0.8 : 0 }));
+      expect(times.filter((t) => t >= 2000)).toEqual([2000, 2500, 3000, 3500]);
+    });
+
+    it('fires bar triggers every fourth beat', () => {
+      const engine = new Engine(1);
+      engine.setProgram(flashOn('bar'));
+      engine.setBeats(clock);
+      expect(hits(engine, 10, 4010)).toEqual([2000, 4000]);
+    });
+
+    it('turns beats into kicks when there is no live audio (phone playback)', () => {
+      const engine = new Engine(1);
+      engine.setProgram(flashOn('kick'));
+      engine.setBeats(clock);
+      // Once the 500 ms fade-in from idle is done, every beat is a kick.
+      expect(hits(engine, 0, 3000)).toEqual([500, 1000, 1500, 2000, 2500]);
+      // Softened: the rise starts at the beat but peaks later.
+      const engine2 = new Engine(1);
+      engine2.setProgram(flashOn('beat'));
+      engine2.setBeats({ ...clock, soft: true });
+      const levels: number[] = [];
+      for (let t = 1000; t <= 1100; t += 10) levels.push(peak(engine2.render(t, master)));
+      expect(levels.indexOf(Math.max(...levels))).toBeGreaterThanOrEqual(5);
+    });
+
+    it('stops beat effects when the clock is cleared', () => {
+      const engine = new Engine(1);
+      engine.setProgram(flashOn('beat'));
+      engine.setBeats(clock);
+      engine.setBeats(undefined);
+      expect(hits(engine, 0, 2000)).toEqual([]);
+    });
+  });
+
   it('scales each channel by its group fader', () => {
     const engine = new Engine(2);
     engine.setGains([1, 0.25]);

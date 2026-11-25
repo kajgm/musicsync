@@ -56,8 +56,12 @@ export class Live {
   broadcast(msg: ServerMessage): void {
     const text = JSON.stringify(msg);
     for (const client of this.clients) {
-      // A client that can't keep up skips preview frames instead of buffering them.
-      if (client.readyState === client.OPEN && client.bufferedAmount < 64 * 1024) client.send(text);
+      // A client that can't keep up skips preview frames instead of buffering them. State goes
+      // out only on change, so a client too far behind for it is closed instead: it reconnects
+      // and gets the whole state then, rather than keeping a stale copy.
+      if (client.readyState !== client.OPEN) continue;
+      if (client.bufferedAmount < 64 * 1024) client.send(text);
+      else if (msg.type === 'state') client.terminate();
     }
   }
 }

@@ -1,0 +1,28 @@
+{
+  "name": "@musicsync/server",
+  "private": true,
+  "type": "module",
+  "description": "Control plane (Fastify: API, live bus, Hue, Spotify, sensors) plus the 50 Hz engine worker",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/main.ts",
+    "start": "node --env-file-if-exists=.env src/main.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.5",
+    "@fastify/static": "10.1.12",
+    "@fastify/websocket": "11.3.7",
+    "@musicsync/audio-features": "*",
+    "@musicsync/engine": "*",
+    "@musicsync/hue": "*",
+    "@musicsync/protocol": "*",
+    "@musicsync/spotify": "*",
+    "bcryptjs": "3.0.3",
+    "fastify": "5.12.8",
+    "jpeg-js": "0.4.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2"
+  }
+}

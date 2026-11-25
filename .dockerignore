@@ -1,0 +1,11 @@
+**/.git
+**/.github
+**/node_modules
+**/dist
+**/target
+**/.data
+**/.env
+**/*.tsbuildinfo
+**/*.test.ts
+docs
+apps/sensor-agent/native

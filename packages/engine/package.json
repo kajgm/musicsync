@@ -1,0 +1,8 @@
+{
+  "name": "@musicsync/engine",
+  "private": true,
+  "type": "module",
+  "description": "Render engine: the built-in look, master controls and the safety limiter. Runs anywhere",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p ." }
+}

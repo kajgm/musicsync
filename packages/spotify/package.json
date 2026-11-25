@@ -1,0 +1,8 @@
+{
+  "name": "@musicsync/spotify",
+  "private": true,
+  "type": "module",
+  "description": "Spotify Web API client: PKCE, token refresh, player state and the playback clock",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p ." }
+}

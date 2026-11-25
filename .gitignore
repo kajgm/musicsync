@@ -1,0 +1,13 @@
+.env
+# Local-only files (credentials, recordings) next to code
+.local/
+
+node_modules/
+target/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Local server data (SQLite) in development
+.data/
+

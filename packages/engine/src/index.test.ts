@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Engine, FlashLimiter } from './index.ts';
+import { DEFAULT_PROFILE, Engine, FlashLimiter, type Program } from './index.ts';
 
 const master = { brightness: 1, intensity: 1, blackout: false };
 const peak = (rgb: Float32Array, ch = 0) => Math.max(rgb[ch * 3], rgb[ch * 3 + 1], rgb[ch * 3 + 2]);
@@ -68,24 +68,89 @@ describe('Engine', () => {
     expect(countRises(levels, 0.25)).toBe(0);
   });
 
-  it('ripples a kick outward in Wave, and all at once in Pulse', () => {
+  /** Peak time per channel around a kick at 500 ms. */
+  const peakTimes = (engine: Engine, setup?: (e: Engine) => void) => {
+    setup?.(engine);
+    const best = Array.from({ length: engine.channels }, () => ({ t: 0, v: 0 }));
+    for (let t = 0; t < 1200; t += 10) {
+      engine.audio(t, { level: 0.2, bass: 0 });
+      if (t === 500) engine.onset(t);
+      const rgb = engine.render(t, master);
+      best.forEach((b, ch) => peak(rgb, ch) > b.v && Object.assign(b, { t, v: peak(rgb, ch) }));
+    }
+    return best.map((b) => b.t);
+  };
+  const flashOnly = (channels: number[], params = {}, profiles: Program['profiles'] = []): Program => ({
+    key: 'test',
+    palette: [[0.7, 0.1, 0]],
+    profiles,
+    layers: [{ effect: 'flash', channels, blend: 'normal', opacity: 1, params }],
+  });
+
+  it('ripples a kick outward with the flash ripple, and all at once without', () => {
     const near = { x: 0.1, y: 0.1, z: 0 };
     const far = { x: 1, y: 1, z: 1 };
-    const peakTimes = (look: 'pulse' | 'wave') => {
-      const engine = new Engine([near, far]);
-      const best = [{ t: 0, v: 0 }, { t: 0, v: 0 }];
-      for (let t = 0; t < 1000; t += 10) {
-        engine.audio(t, { level: 0.2, bass: 0 });
-        if (t === 500) engine.onset(t);
-        const rgb = engine.render(t, { ...master, look });
-        for (const ch of [0, 1]) if (peak(rgb, ch) > best[ch].v) best[ch] = { t, v: peak(rgb, ch) };
-      }
-      return best.map((b) => b.t);
-    };
-    const [pNear, pFar] = peakTimes('pulse');
+    const [pNear, pFar] = peakTimes(new Engine([near, far]), (e) => e.setProgram(flashOnly([0, 1])));
     expect(pFar).toBe(pNear);
-    const [wNear, wFar] = peakTimes('wave');
+    const [wNear, wFar] = peakTimes(new Engine([near, far]), (e) => e.setProgram(flashOnly([0, 1], { rippleMs: 260 })));
     expect(wFar - wNear).toBeGreaterThanOrEqual(200);
+  });
+
+  it('delays one light by its latency trim and leaves the others alone', () => {
+    const profiles = [DEFAULT_PROFILE, { ...DEFAULT_PROFILE, latencyMs: 100 }];
+    const [a, b] = peakTimes(new Engine(2), (e) => e.setProgram(flashOnly([0, 1], {}, profiles)));
+    expect(b - a).toBe(100);
+  });
+
+  it('tunes one light’s response without touching the others', () => {
+    const program = (profiles: Program['profiles']): Program => ({
+      key: 'test',
+      palette: [[0.7, 0.1, 0]],
+      profiles,
+      layers: [{ effect: 'solid', channels: [0, 1], blend: 'normal', opacity: 1, params: { brightness: { bind: 'audio.bass', range: [0, 1], curve: 'linear', attackMs: 0, releaseMs: 0 } } }],
+    });
+    const swing = (profiles: Program['profiles']) => {
+      const engine = new Engine(2);
+      engine.setProgram(program(profiles));
+      const lo: number[] = [];
+      const hi: number[] = [];
+      for (let t = 0; t < 2000; t += 20) {
+        engine.audio(t, { level: 0.5, bass: Math.floor(t / 200) % 2 });
+        const rgb = engine.render(t, master);
+        if (t > 1000) [0, 1].forEach((ch) => ((Math.floor(t / 200) % 2 ? hi : lo)[ch] = peak(rgb, ch)));
+      }
+      return [hi[0] - lo[0], hi[1] - lo[1]];
+    };
+    const [a0, b0] = swing([]);
+    const [a1, b1] = swing([DEFAULT_PROFILE, { ...DEFAULT_PROFILE, sensitivity: 0 }]);
+    expect(a1).toBeCloseTo(a0, 5); // light 0 unchanged
+    expect(b0).toBeGreaterThan(0.3);
+    expect(b1).toBeLessThan(0.05); // light 1 no longer follows the bass
+  });
+
+  it('keeps a light without strobing from jumping', () => {
+    const engine = new Engine(1);
+    engine.setProgram(flashOnly([0], { decayMs: 50 }, [{ ...DEFAULT_PROFILE, strobe: false }]));
+    const levels: number[] = [];
+    for (let t = 0; t < 3000; t += 20) {
+      engine.audio(t, { level: 1, bass: 1 });
+      if (t % 400 === 0) engine.onset(t);
+      levels.push(peak(engine.render(t, master)));
+    }
+    expect(countRises(levels, 0.26)).toBe(0);
+  });
+
+  it('crossfades to a new program instead of jumping', () => {
+    const engine = new Engine(1);
+    const solid = (key: string, brightness: number): Program => ({ key, palette: [[0.7, 0, 0]], profiles: [], layers: [{ effect: 'solid', channels: [0], blend: 'normal', opacity: 1, params: { brightness } }] });
+    engine.setProgram(solid('a', 0.1));
+    for (let t = 0; t <= 1000; t += 20) engine.render(t, master);
+    engine.setProgram(solid('b', 0.9));
+    const levels: number[] = [];
+    for (let t = 1020; t <= 1700; t += 20) levels.push(peak(engine.render(t, master)));
+    expect(levels[0]).toBeLessThan(0.2);
+    expect(levels.at(-1)).toBeGreaterThan(0.5);
+    for (let i = 1; i < levels.length; i++) expect(Math.abs(levels[i] - levels[i - 1])).toBeLessThan(0.1);
   });
 
   it('scales each channel by its group fader', () => {

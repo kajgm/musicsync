@@ -212,7 +212,15 @@ export class Agc {
   }
 }
 
-/** Bass amplitude (40–320 Hz) from a frame's band energies in dB. */
-export function bassAmplitude(bands: ArrayLike<number>): number {
-  return Math.sqrt(10 ** (bands[0] / 10) + 10 ** (bands[1] / 10) + 10 ** (bands[2] / 10));
+/** Amplitude of bands [from, to) from a frame's band energies in dB. */
+export function bandAmplitude(bands: ArrayLike<number>, from: number, to: number): number {
+  let energy = 0;
+  for (let i = from; i < to; i++) energy += 10 ** (bands[i] / 10);
+  return Math.sqrt(energy);
 }
+
+/** Bass amplitude (40–320 Hz). */
+export const bassAmplitude = (bands: ArrayLike<number>) => bandAmplitude(bands, 0, 3);
+/** Mids (320–2560 Hz) and highs (2.5–16 kHz). */
+export const midAmplitude = (bands: ArrayLike<number>) => bandAmplitude(bands, 3, 6);
+export const highAmplitude = (bands: ArrayLike<number>) => bandAmplitude(bands, 6, 8);

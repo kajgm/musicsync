@@ -3,66 +3,13 @@
 // itself, which the Live screen reuses as its preview.
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { stageFixtures, type Fixture, type Layout, type LiveState, type Point } from '@musicsync/protocol';
+import { ProfileEditor } from './controls.tsx';
+import { useDraft } from './draft.ts';
 import type { LiveClient } from './live.ts';
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 const snap = (v: number) => Math.round(v * 10) / 10;
 const LIGHT_R = 0.18;
-
-// ---- Saving ----
-
-/**
- * The layout being edited. Changes show at once and save in order, each based on the
- * revision the last save returned. A refused save falls back to the server's layout.
- */
-function useDraft(layout: Layout) {
-  const [draft, setDraftState] = useState(layout);
-  const [error, setError] = useState<string>();
-  const draftRef = useRef(layout);
-  const server = useRef(layout);
-  const rev = useRef(layout.rev);
-  const pending = useRef(0);
-  const chain = useRef(Promise.resolve());
-  const setDraft = (next: Layout) => {
-    draftRef.current = next;
-    setDraftState(next);
-  };
-  useEffect(() => {
-    server.current = layout;
-    if (pending.current === 0) {
-      rev.current = layout.rev;
-      setDraft(layout);
-    }
-  }, [layout]);
-
-  const save = (next: Layout = draftRef.current) => {
-    setDraft(next);
-    setError(undefined);
-    pending.current++;
-    chain.current = chain.current.then(async () => {
-      try {
-        const res = await fetch('/api/layout', {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...next, rev: rev.current }),
-        }).catch(() => undefined);
-        const data = ((await res?.json().catch(() => undefined)) ?? {}) as { rev?: number; error?: string };
-        if (res?.ok && data.rev !== undefined) {
-          rev.current = data.rev;
-        } else {
-          setError(data.error ?? 'Can’t reach the server: the change wasn’t saved.');
-          rev.current = server.current.rev;
-          setDraft(server.current);
-        }
-      } finally {
-        pending.current--;
-        // The server's copy of our own save may have arrived while saves were pending.
-        if (pending.current === 0 && server.current.rev === rev.current) setDraft(server.current);
-      }
-    });
-  };
-  return { draft, draftRef, setDraft, save, error };
-}
 
 // ---- Floor plan ----
 
@@ -217,7 +164,7 @@ export function PlanPreview({ client, state }: { client: LiveClient; state: Live
 type Selection = { kind: 'fixture' | 'room'; id: string } | { kind: 'stage'; id?: undefined } | undefined;
 
 export function LayoutPage({ state, client }: { state: LiveState; client: LiveClient }) {
-  const { draft, draftRef, setDraft, save, error } = useDraft(state.layout);
+  const { draft, draftRef, setDraft, save, update, error } = useDraft(state.layout, '/api/layout');
   const [floorId, setFloorId] = useState(draft.stage.floorId);
   const [selection, setSelection] = useState<Selection>();
   const [drawing, setDrawing] = useState<Point[]>();
@@ -233,7 +180,6 @@ export function LayoutPage({ state, client }: { state: LiveState; client: LiveCl
   const missing = state.hue.paired ? draft.fixtures.filter((f) => !names.has(f.id)) : [];
   const inStage = stageFixtures(draft);
 
-  const update = (fn: (l: Layout) => Layout) => save(fn(draftRef.current));
 
   // Dragging edits the draft; letting go saves it.
   function onDown(target: PlanTarget, at: Point) {
@@ -353,6 +299,11 @@ export function LayoutPage({ state, client }: { state: LiveState; client: LiveCl
             <NumberField label="Height (m)" value={selFixture.z} min={0} max={20} onCommit={(z) => update((l) => withFixture(l, selFixture.id, { z }))} />
           </div>
           <TagsField value={selFixture.tags} onCommit={(tags) => update((l) => withFixture(l, selFixture.id, { tags }))} />
+          <details>
+            <summary>How this light responds</summary>
+            <p className="hint">Only this light. Its groups and the playing look can change it further.</p>
+            <ProfileEditor value={selFixture.response} onChange={(response, soon) => update((l) => withFixture(l, selFixture.id, { response }), soon)} />
+          </details>
           {draft.groups.length > 0 && (
             <fieldset className="checks">
               <legend>Groups</legend>
@@ -458,10 +409,19 @@ export function LayoutPage({ state, client }: { state: LiveState; client: LiveCl
         <p className="hint">Each group gets a fader on the Live screen. Add lights to a group by selecting them on the plan.</p>
         <ul className="tray">
           {draft.groups.map((g) => (
-            <li key={g.id}>
-              <TextField label="Name" value={g.name} onCommit={(name) => update((l) => ({ ...l, groups: l.groups.map((x) => (x.id === g.id ? { ...x, name } : x)) }))} />
-              <span className="hint">{g.fixtureIds.length} lights</span>
-              <button onClick={() => update((l) => ({ ...l, groups: l.groups.filter((x) => x.id !== g.id) }))}>Delete</button>
+            <li key={g.id} className="stacked">
+              <div className="row">
+                <TextField label="Name" value={g.name} onCommit={(name) => update((l) => ({ ...l, groups: l.groups.map((x) => (x.id === g.id ? { ...x, name } : x)) }))} />
+                <span className="hint">{g.fixtureIds.length} lights</span>
+                <button onClick={() => update((l) => ({ ...l, groups: l.groups.filter((x) => x.id !== g.id) }))}>Delete</button>
+              </div>
+              <details>
+                <summary>How these lights respond</summary>
+                <ProfileEditor
+                  value={g.response}
+                  onChange={(response, soon) => update((l) => ({ ...l, groups: l.groups.map((x) => (x.id === g.id ? { ...x, response } : x)) }), soon)}
+                />
+              </details>
             </li>
           ))}
         </ul>

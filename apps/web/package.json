@@ -2,13 +2,14 @@
   "name": "@musicsync/web",
   "private": true,
   "type": "module",
-  "description": "Phone-first web app: Live controls and Setup (bridge pairing, Spotify link, loopback agent)",
+  "description": "Phone-first web app: Live controls, Layout, Looks and Setup",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {
+    "@musicsync/engine": "*",
     "@musicsync/protocol": "*",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

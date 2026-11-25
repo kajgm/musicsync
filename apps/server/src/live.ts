@@ -8,6 +8,7 @@ export class Live {
   readonly state: LiveState;
   private readonly clients = new Set<WebSocket>();
   private queued = false;
+  private readonly listeners: Array<(state: LiveState) => void> = [];
 
   constructor(app: FastifyInstance, initial: LiveState, onMessage: (msg: ClientMessage) => void) {
     this.state = initial;
@@ -33,7 +34,10 @@ export class Live {
     });
   }
 
-  /** Merges top-level fields into the state; one broadcast per tick however many patches. */
+  /**
+   * Merges top-level fields into the state; one broadcast per tick however many patches.
+   * Change listeners run after it, and must only patch when something actually changes.
+   */
   patch(update: Partial<LiveState>): void {
     Object.assign(this.state, update);
     if (this.queued) return;
@@ -41,7 +45,12 @@ export class Live {
     queueMicrotask(() => {
       this.queued = false;
       this.broadcast({ type: 'state', state: this.state });
+      for (const listener of this.listeners) listener(this.state);
     });
+  }
+
+  onChange(listener: (state: LiveState) => void): void {
+    this.listeners.push(listener);
   }
 
   broadcast(msg: ServerMessage): void {

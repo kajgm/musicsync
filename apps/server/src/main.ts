@@ -6,7 +6,9 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
+import { DEFAULT_MASTER, Master, type LiveState } from '@musicsync/protocol';
+import { Director } from './director.ts';
+import { loadLibrary, registerLibrary } from './library.ts';
 import { registerAuth } from './auth.ts';
 import { loadConfig } from './config.ts';
 import { EngineHost } from './engine-host.ts';
@@ -25,14 +27,18 @@ await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
 registerAuth(app, config);
 app.get('/healthz', async () => ({ ok: true, version: config.version }));
 
-// Settings saved by an older version lack the newer fields.
-const master: Master = { ...DEFAULT_MASTER, ...store.get<Partial<Master>>('master') };
+// Settings saved by an older version lack newer fields (and parsing drops retired ones).
+const saved = Master.safeParse({ ...DEFAULT_MASTER, ...store.get<Partial<Master>>('master') });
+const master: Master = saved.success ? saved.data : DEFAULT_MASTER;
+const library = loadLibrary(store);
 const initial: LiveState = {
   running: false,
   master,
   mode: 'idle',
   hue: { paired: false, lights: [], devices: [] },
   layout: loadLayout(store),
+  library,
+  program: { lookId: library.defaultLookId, reason: 'default', palette: [], auto: false },
   spotify: {
     configured: Boolean(config.spotifyClientId),
     redirectUri: `${config.publicUrl}/api/auth/spotify/callback`,
@@ -50,9 +56,10 @@ const live = new Live(app, initial, (msg) => {
     engine.send({ type: 'master', master: next });
     live.patch({ master: next });
     if (msg.master.groups) hue.sendGains();
+  } else if (msg.type === 'run') {
+    director.run(msg.running);
   } else {
-    engine.send({ type: 'run', running: msg.running });
-    live.patch({ running: msg.running });
+    director.pick(msg.lookId);
   }
 });
 const engine = new EngineHost(app.log, (msg) => {
@@ -63,6 +70,9 @@ engine.send({ type: 'master', master });
 
 const hue = new HueModule(app, store, live, engine);
 registerLayout(app, store, live, () => void hue.resync());
+registerLibrary(app, store, live);
+const director = new Director(live, engine, app.log);
+director.update();
 const spotify = new SpotifyModule(app, config, store, live);
 new SensorsModule(app, store, live, engine);
 

@@ -2,7 +2,7 @@
 // and the preview. Nothing slow runs on this thread; the control plane sends it settings
 // and audio features as messages.
 import { parentPort } from 'node:worker_threads';
-import { Engine } from '@musicsync/engine';
+import { Engine, type Program } from '@musicsync/engine';
 import { openHueStream, type HueStream } from '@musicsync/hue';
 import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
 import { now, type FromWorker, type HueTarget, type ToWorker } from './engine-host.ts';
@@ -19,6 +19,7 @@ const post = (msg: FromWorker) => port.postMessage(msg);
 let engine = new Engine(SIM_CHANNELS);
 let master: Master = DEFAULT_MASTER;
 let gains: number[] = [];
+let program: Program | undefined;
 /** The engine is rebuilt only when the channel layout changes, so pausing doesn't reset it. */
 let layoutKey = '0';
 let target: HueTarget | null = null;
@@ -95,6 +96,10 @@ port.on('message', (msg: ToWorker) => {
       gains = msg.gains;
       engine.setGains(gains);
       break;
+    case 'program':
+      program = msg.program;
+      engine.setProgram(program);
+      break;
     case 'run':
       running = msg.running;
       void reconcile();
@@ -107,6 +112,7 @@ port.on('message', (msg: ToWorker) => {
         const { layout } = msg;
         engine = new Engine(layout === 0 || (Array.isArray(layout) && layout.length === 0) ? SIM_CHANNELS : layout);
         engine.setGains(gains);
+        if (program) engine.setProgram(program);
       }
       void reconcile();
       break;

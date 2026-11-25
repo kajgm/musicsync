@@ -45,20 +45,18 @@ export const Master = z.object({
   blackout: z.boolean(),
   /** Delays the lights behind the captured audio, set by ear for the speaker. */
   delayMs: z.number().int().min(0).max(1000),
-  look: z.enum(['pulse', 'wave']),
   /** Fader level per group id; a light in several groups gets the product. Missing = 1. */
   groups: z.record(z.string().max(64), z.number().min(0).max(1)),
 });
 export type Master = z.infer<typeof Master>;
 
-export const DEFAULT_MASTER: Master = { brightness: 0.8, intensity: 0.8, blackout: false, delayMs: 0, look: 'pulse', groups: {} };
-
-/** Pulse: colours drift across the room, kicks flash. Wave: kicks ripple out from where you sit. */
-export const LOOKS: Record<Master['look'], string> = { pulse: 'Pulse', wave: 'Wave' };
+export const DEFAULT_MASTER: Master = { brightness: 0.8, intensity: 0.8, blackout: false, delayMs: 0, groups: {} };
 
 export const ClientMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('master'), master: Master.partial() }),
   z.object({ type: z.literal('run'), running: z.boolean() }),
+  /** Play this look for the current track (overriding rules), or go back to the rules (null). */
+  z.object({ type: z.literal('look'), lookId: z.string().min(1).max(64).nullable() }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessage>;
 
@@ -68,7 +66,28 @@ const Id = z.string().min(1).max(64);
 const Name = z.string().trim().min(1).max(60);
 const Tags = z.array(z.string().trim().min(1).max(30)).max(20);
 const Metres = z.number().min(-1000).max(1000);
+const Unit = z.number().min(0).max(1);
+const Ms = z.number().min(0).max(5000);
 export const Point = z.object({ x: Metres, y: Metres });
+
+/**
+ * How a light responds (architecture §4.3). Set per light, overridden per group (in list
+ * order) and per look; unset fields fall through. Mirrors the engine's `Profile`.
+ */
+export const Profile = z.object({
+  min: Unit,
+  max: Unit,
+  gamma: z.number().min(0.2).max(5),
+  attackMs: Ms,
+  releaseMs: Ms,
+  sensitivity: z.number().min(0).max(3),
+  band: z.enum(['level', 'bass', 'mid', 'high']),
+  latencyMs: z.number().min(0).max(1000),
+  strobe: z.boolean(),
+});
+export const ProfilePatch = Profile.partial();
+export type Profile = z.infer<typeof Profile>;
+export type ProfilePatch = z.infer<typeof ProfilePatch>;
 
 export const Floor = z.object({
   id: Id,
@@ -88,8 +107,9 @@ export const Fixture = z.object({
   /** Height above the floor, metres. */
   z: z.number().min(0).max(20),
   tags: Tags,
+  response: ProfilePatch.optional(),
 });
-export const Group = z.object({ id: Id, name: Name, fixtureIds: z.array(Id).max(200) });
+export const Group = z.object({ id: Id, name: Name, fixtureIds: z.array(Id).max(200), response: ProfilePatch.optional() });
 /** Where you listen from. Its lights make up the app's Entertainment area. */
 export const Stage = z.object({
   floorId: Id,
@@ -163,12 +183,91 @@ export function stageSpace(stage: Stage, fixtures: Fixture[]): Array<{ id: strin
   return rel.map((p) => ({ id: p.id, x: round(p.x), y: round(p.y), z: round(p.z) }));
 }
 
+// ---- Looks (architecture §4.1, §4.3, §7) ----
+
+/** L 0..1, C 0..0.4, H degrees. */
+export const Oklch = z.object({ l: Unit, c: z.number().min(0).max(0.4), h: z.number().min(0).max(360) });
+export type Oklch = z.infer<typeof Oklch>;
+
+/** A number parameter following a signal. Mirrors the engine's `Binding`. */
+export const Binding = z.object({
+  bind: z.string().max(40),
+  range: z.tuple([z.number().min(-1e4).max(1e4), z.number().min(-1e4).max(1e4)]),
+  curve: z.enum(['linear', 'exp', 'log']),
+  attackMs: Ms,
+  releaseMs: Ms,
+});
+export type Binding = z.infer<typeof Binding>;
+
+/** Which lights: a light matching any entry counts; all empty = every light. */
+export const Target = z.object({ tags: Tags, groups: z.array(Id).max(50), fixtures: z.array(Id).max(200) });
+export type Target = z.infer<typeof Target>;
+export const ALL: Target = { tags: [], groups: [], fixtures: [] };
+
+export const LookLayer = z.object({
+  id: Id,
+  enabled: z.boolean(),
+  /** An effect id from the engine's library. */
+  effect: z.string().max(40),
+  target: Target,
+  blend: z.enum(['normal', 'add', 'max', 'multiply', 'screen']),
+  opacity: Unit,
+  params: z.record(z.string().max(40), z.union([z.number(), z.string().max(40), Binding])),
+});
+export type LookLayer = z.infer<typeof LookLayer>;
+
+export const Look = z.object({
+  id: Id,
+  name: Name,
+  /** album: colours from the playing track's cover; `colors` are used when there's none. */
+  palette: z.object({ source: z.enum(['fixed', 'album']), colors: z.array(Oklch).min(1).max(12) }),
+  /** Bottom first. */
+  layers: z.array(LookLayer).max(16),
+  /** Per-look changes to how lights respond, applied over the lights' and groups' own. */
+  overrides: z.array(z.object({ target: Target, response: ProfilePatch })).max(20),
+});
+export type Look = z.infer<typeof Look>;
+
+/** Play a look whenever this track, playlist or artist plays. Track beats playlist beats artist. */
+export const Rule = z.object({
+  id: Id,
+  kind: z.enum(['track', 'playlist', 'artist']),
+  /** Spotify URI. */
+  uri: z.string().min(1).max(120),
+  label: z.string().max(200),
+  lookId: Id,
+});
+export type Rule = z.infer<typeof Rule>;
+
+export const Library = z
+  .object({
+    rev: z.number().int().min(0),
+    looks: z.array(Look).min(1).max(100),
+    rules: z.array(Rule).max(500),
+    /** Plays when no rule matches. */
+    defaultLookId: Id,
+    /** Start the lights when Spotify plays on the PC, stop them after it pauses. */
+    autoStart: z.boolean(),
+  })
+  .superRefine((l, ctx) => {
+    const ids = new Set(l.looks.map((x) => x.id));
+    const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
+    if (ids.size !== l.looks.length) issue('Duplicate look id');
+    if (!ids.has(l.defaultLookId)) issue('The default look doesn’t exist');
+    for (const r of l.rules) if (!ids.has(r.lookId)) issue(`Rule “${r.label}” uses a look that doesn’t exist`);
+  });
+export type Library = z.infer<typeof Library>;
+
 export type Track = {
   id: string;
   name: string;
   artists: string;
+  /** Spotify URIs and names, for artist rules. */
+  artistList: Array<{ uri: string; name: string }>;
   album: string;
   artUrl?: string;
+  /** The smallest cover image, for palettes. */
+  thumbUrl?: string;
   durationMs: number;
 };
 
@@ -199,12 +298,24 @@ export type LiveState = {
     playing: boolean;
     device?: { name: string; type: string };
     track?: Track;
+    /** What the track plays from, e.g. a playlist. */
+    context?: { uri: string; type: string; name?: string };
     /** Track position at server time `at` (epoch ms). */
     progressMs?: number;
     at?: number;
     error?: string;
   };
   layout: Layout;
+  library: Library;
+  /** What's playing on the lights and why. */
+  program: {
+    lookId: string;
+    reason: 'manual' | 'track' | 'playlist' | 'artist' | 'default';
+    /** The palette in use (the album's colours for an album palette). */
+    palette: Oklch[];
+    /** Lights started by themselves and stop when the music does. */
+    auto: boolean;
+  };
   agent: { connected: boolean; device?: string; framesPerSec?: number };
   output: { status: 'off' | 'connecting' | 'streaming' | 'error' | 'no-bridge'; fps: number; error?: string };
 };

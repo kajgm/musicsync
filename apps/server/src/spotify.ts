@@ -1,5 +1,5 @@
-// music module, Phase 1: link a Spotify account (PKCE through this server), keep the
-// tokens fresh, and poll the player for Now Playing and the playback position.
+// music module: link a Spotify account (PKCE through this server), keep the tokens fresh,
+// and poll the player for Now Playing, the playback position and what it plays from.
 import { randomBytes } from 'node:crypto';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import {
   createPkce,
   exchangeCode,
   getPlayer,
+  getPlaylistName,
   refreshTokens,
   type PlayerState,
   type Tokens,
@@ -34,6 +35,20 @@ export class SpotifyModule {
   private readonly clock = new PlaybackClock();
   private tokens: Tokens | undefined;
   private timer: NodeJS.Timeout | undefined;
+  /** Playlist URI → name (undefined: Spotify wouldn't say). */
+  private readonly playlistNames = new Map<string, string | undefined>();
+
+  private async lookUpPlaylist(uri: string): Promise<void> {
+    this.playlistNames.set(uri, undefined); // one attempt per playlist
+    try {
+      const name = await getPlaylistName(await this.accessToken(), uri);
+      this.playlistNames.set(uri, name);
+      const { context } = this.live.state.spotify;
+      if (name && context?.uri === uri) this.patch({ context: { ...context, name } });
+    } catch (err) {
+      this.log.warn({ err }, 'Spotify playlist lookup failed');
+    }
+  }
 
   constructor(app: FastifyInstance, config: Config, store: Store, live: Live) {
     this.config = config;
@@ -115,7 +130,7 @@ export class SpotifyModule {
         next = reply.state.is_playing ? POLL_PLAYING_MS : POLL_IDLE_MS;
         this.update(reply.state, reply.sentAt, reply.receivedAt);
       } else {
-        this.patch({ playing: false, device: undefined, track: undefined, progressMs: undefined, at: undefined, error: undefined });
+        this.patch({ playing: false, device: undefined, track: undefined, context: undefined, progressMs: undefined, at: undefined, error: undefined });
       }
     } catch (err) {
       const message = (err as Error).message;
@@ -136,20 +151,26 @@ export class SpotifyModule {
   private update(state: PlayerState, sentAt: number, receivedAt: number): void {
     const item = state.item;
     if (!item || state.progress_ms == null) {
-      this.patch({ playing: false, track: undefined, progressMs: undefined, at: undefined, error: undefined });
+      this.patch({ playing: false, track: undefined, context: undefined, progressMs: undefined, at: undefined, error: undefined });
       return;
     }
     this.clock.update({ progressMs: state.progress_ms, playing: state.is_playing, sentAt, receivedAt });
     const t = now();
+    const images = item.album?.images ?? [];
+    const context = state.context ? { uri: state.context.uri, type: state.context.type, name: this.playlistNames.get(state.context.uri) } : undefined;
+    if (context?.type === 'playlist' && !this.playlistNames.has(context.uri)) void this.lookUpPlaylist(context.uri);
     this.patch({
       playing: state.is_playing,
       device: state.device ? { name: state.device.name, type: state.device.type } : undefined,
+      context,
       track: {
         id: item.id,
         name: item.name,
         artists: (item.artists ?? []).map((a) => a.name).join(', '),
+        artistList: (item.artists ?? []).filter((a) => a.uri).map((a) => ({ uri: a.uri!, name: a.name })),
         album: item.album?.name ?? '',
-        artUrl: item.album?.images?.[0]?.url,
+        artUrl: images[0]?.url,
+        thumbUrl: images.at(-1)?.url,
         durationMs: item.duration_ms,
       },
       progressMs: Math.round(this.clock.positionAt(t)),

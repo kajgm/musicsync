@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import { LOOKS, stageFixtures, type LiveState, type Master } from '@musicsync/protocol';
+import { stageFixtures, type LiveState, type Rule } from '@musicsync/protocol';
+import { LooksPage, REASONS, css, saveLibrary } from './Looks.tsx';
 import { LayoutPage, PlanPreview } from './Layout.tsx';
 import { LiveClient } from './live.ts';
 
@@ -59,8 +60,8 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
   );
 }
 
-type Page = 'live' | 'layout' | 'setup';
-const PAGES: Record<Page, string> = { live: 'Live', layout: 'Layout', setup: 'Setup' };
+type Page = 'live' | 'looks' | 'layout' | 'setup';
+const PAGES: Record<Page, string> = { live: 'Live', looks: 'Looks', layout: 'Layout', setup: 'Setup' };
 
 function usePage(): Page {
   const read = (): Page => {
@@ -108,6 +109,7 @@ function Pages({ client, page, onSignedOut }: { client: LiveClient; page: Page; 
       {!connected && <p className="banner">Connecting to the server…</p>}
       {state && page === 'setup' && <Setup state={state} onSignedOut={onSignedOut} />}
       {state && page === 'layout' && <LayoutPage state={state} client={client} />}
+      {state && page === 'looks' && <LooksPage state={state} client={client} />}
       {state && page === 'live' && <Live state={state} client={client} />}
     </>
   );
@@ -137,6 +139,67 @@ function outputText(state: LiveState): string {
   }
 }
 
+/** The playing look, why it plays, and rules from what's playing now. */
+function LookPicker({ state, client }: { state: LiveState; client: LiveClient }) {
+  const { library, program, spotify } = state;
+  const [message, setMessage] = useState<string>();
+  const track = spotify.track;
+  const playlist = spotify.context?.type === 'playlist' ? spotify.context : undefined;
+  const artist = track?.artistList[0];
+  async function addRule(kind: Rule['kind'], uri: string, label: string) {
+    const rules = [...library.rules.filter((r) => !(r.kind === kind && r.uri === uri)), { id: Math.random().toString(36).slice(2, 10), kind, uri, label, lookId: program.lookId }];
+    const error = await saveLibrary({ ...library, rules });
+    const look = library.looks.find((l) => l.id === program.lookId)?.name;
+    setMessage(error ?? `${look} now plays for ${label}.`);
+  }
+  return (
+    <section className="card">
+      <label className="field">
+        Look
+        <select value={program.lookId} onChange={(e) => client.send({ type: 'look', lookId: e.target.value })}>
+          {library.looks.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {program.palette.length > 0 && (
+        <div className="swatches small" aria-label="Palette in use">
+          {program.palette.map((c, i) => (
+            <span key={i} className="swatch" style={{ background: css(c) }} />
+          ))}
+        </div>
+      )}
+      <p className="hint">
+        This is {REASONS[program.reason]}.{program.auto && ' The lights started by themselves and stop when the music does.'}{' '}
+        {program.reason === 'manual' && (
+          <button className="link" onClick={() => client.send({ type: 'look', lookId: null })}>
+            Back to the rules
+          </button>
+        )}
+      </p>
+      {track && (
+        <details>
+          <summary>Always play this look for…</summary>
+          <div className="row wrap">
+            <button onClick={() => void addRule('track', `spotify:track:${track.id}`, `“${track.name}”`)}>This song</button>
+            {playlist && (
+              <button onClick={() => void addRule('playlist', playlist.uri, playlist.name ? `the playlist “${playlist.name}”` : 'this playlist')}>This playlist</button>
+            )}
+            {artist && <button onClick={() => void addRule('artist', artist.uri, artist.name)}>{artist.name}</button>}
+          </div>
+        </details>
+      )}
+      {message && (
+        <p className="hint" role="status">
+          {message}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Live({ state, client }: { state: LiveState; client: LiveClient }) {
   const { master, running, hue } = state;
   const setMaster = (m: Partial<LiveState['master']>) => client.send({ type: 'master', master: m });
@@ -160,17 +223,8 @@ function Live({ state, client }: { state: LiveState; client: LiveClient }) {
           <Preview client={client} names={hue.lights.map((l) => l.name)} />
         )}
       </section>
+      <LookPicker state={state} client={client} />
       <section className="card">
-        <label className="field">
-          Look
-          <select value={master.look} onChange={(e) => setMaster({ look: e.target.value as Master['look'] })}>
-            {(Object.keys(LOOKS) as Array<Master['look']>).map((look) => (
-              <option key={look} value={look}>
-                {LOOKS[look]}
-              </option>
-            ))}
-          </select>
-        </label>
         <Slider label="Brightness" value={master.brightness} onChange={(brightness) => setMaster({ brightness })} />
         <Slider label="Intensity" value={master.intensity} onChange={(intensity) => setMaster({ intensity })} />
         <Delay value={master.delayMs} onChange={(delayMs) => setMaster({ delayMs })} />

@@ -1,7 +1,7 @@
 // Runs the engine worker (50 Hz render + light output) and restarts it if it dies.
 import { Worker } from 'node:worker_threads';
 import type { FastifyBaseLogger } from 'fastify';
-import type { Position } from '@musicsync/engine';
+import type { Position, Program } from '@musicsync/engine';
 import type { HueCreds } from '@musicsync/hue';
 import type { LiveState, Master } from '@musicsync/protocol';
 
@@ -17,8 +17,10 @@ export type ToWorker =
   | { type: 'gains'; gains: number[] }
   | { type: 'run'; running: boolean }
   | { type: 'master'; master: Master }
+  /** The look to run, compiled for the current channels. */
+  | { type: 'program'; program: Program }
   /** Gain-controlled audio features; `t` is server time (epoch ms) of the audio. */
-  | { type: 'audio'; t: number; level: number; bass: number; onset: boolean }
+  | { type: 'audio'; t: number; level: number; bass: number; mid: number; high: number; onset: boolean }
   | { type: 'shutdown' };
 
 export type FromWorker =

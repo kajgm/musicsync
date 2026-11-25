@@ -1,15 +1,17 @@
-// sensors module, Phase 1: the loopback agent connects over WSS /api/agent with its token,
-// syncs its clock to ours and streams feature frames. Here they become the engine's audio
-// signals: gain-controlled bass and level, plus kick onsets.
+// sensors module: the loopback agent connects over WSS /api/agent with its token, syncs
+// its clock to ours and streams feature frames. Here they become the engine's audio
+// signals: gain-controlled level, bass, mids and highs, plus kick onsets.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { Agc, OnsetPicker, bassAmplitude } from '@musicsync/audio-features';
+import { Agc, OnsetPicker, bassAmplitude, highAmplitude, midAmplitude } from '@musicsync/audio-features';
 import { AgentMessage, type AgentFrame, type LiveState, type ServerToAgent } from '@musicsync/protocol';
 import { now, type EngineHost } from './engine-host.ts';
 import type { Live } from './live.ts';
 import type { Store } from './store.ts';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest();
+
+type Agcs = Record<'level' | 'bass' | 'mid' | 'high', Agc>;
 
 export class SensorsModule {
   private readonly live: Live;
@@ -39,8 +41,7 @@ export class SensorsModule {
       let signedIn = false;
       const kick = setTimeout(() => socket.close(4401, 'No hello'), 5000);
       const kicks = new OnsetPicker();
-      const bassAgc = new Agc();
-      const levelAgc = new Agc();
+      const agc: Agcs = { level: new Agc(), bass: new Agc(), mid: new Agc(), high: new Agc() };
       const send = (msg: ServerToAgent) => socket.send(JSON.stringify(msg));
 
       socket.on('message', (data) => {
@@ -65,7 +66,7 @@ export class SensorsModule {
         } else if (msg.type === 'ping') {
           send({ type: 'pong', t0: msg.t0, t: now() });
         } else if (msg.type === 'frame') {
-          this.frame(msg, kicks.push(msg.lowFlux, msg.t) !== undefined, bassAgc, levelAgc);
+          this.frame(msg, kicks.push(msg.lowFlux, msg.t) !== undefined, agc);
         }
       });
       socket.on('close', () => {
@@ -103,10 +104,12 @@ export class SensorsModule {
     return !spotify.linked || (spotify.playing && spotify.device?.type === 'Computer');
   }
 
-  private frame(f: AgentFrame, onset: boolean, bassAgc: Agc, levelAgc: Agc): void {
+  private frame(f: AgentFrame, onset: boolean, agc: Agcs): void {
     this.frames++;
-    const bass = bassAgc.push(bassAmplitude(f.bands), f.t);
-    const level = levelAgc.push(f.rms, f.t);
-    if (this.audioAllowed()) this.engine.send({ type: 'audio', t: f.t, level, bass, onset });
+    const level = agc.level.push(f.rms, f.t);
+    const bass = agc.bass.push(bassAmplitude(f.bands), f.t);
+    const mid = agc.mid.push(midAmplitude(f.bands), f.t);
+    const high = agc.high.push(highAmplitude(f.bands), f.t);
+    if (this.audioAllowed()) this.engine.send({ type: 'audio', t: f.t, level, bass, mid, high, onset });
   }
 }

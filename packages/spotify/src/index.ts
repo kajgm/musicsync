@@ -70,14 +70,30 @@ export type PlayerState = {
   progress_ms: number | null;
   device?: { id: string | null; name: string; type: string };
   currently_playing_type?: string;
+  /** What the track plays from: a playlist, album or artist. */
+  context?: { uri: string; type: string } | null;
   item?: {
     id: string;
+    uri?: string;
     name: string;
     duration_ms: number;
-    artists?: Array<{ name: string }>;
+    artists?: Array<{ name: string; uri?: string }>;
+    /** Largest first. */
     album?: { name: string; images?: Array<{ url: string; width: number | null }> };
   } | null;
 };
+
+/** A playlist's name; undefined if Spotify won't say (e.g. someone else's private playlist). */
+export async function getPlaylistName(accessToken: string, uri: string): Promise<string | undefined> {
+  const id = /^spotify:playlist:([A-Za-z0-9]{1,64})$/.exec(uri)?.[1];
+  if (!id) return undefined;
+  const res = await fetch(`https://api.spotify.com/v1/playlists/${id}?fields=name`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) return undefined;
+  return ((await res.json()) as { name?: string }).name;
+}
 
 export type PlayerReply = {
   /** 200 with state, 204 when nothing is playing anywhere, 401 for an expired token, 429 when rate limited. */

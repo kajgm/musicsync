@@ -5,20 +5,20 @@ Philips Hue lights that follow the music. A self-hosted server streams to the li
 - Design: [docs/architecture.md](docs/architecture.md). Phase 0 measurements: [spikes/README.md](spikes/README.md). Decisions: [docs/decisions/](docs/decisions/).
 - v1, the Python desktop app (`main.py`), is documented in [docs/v1.md](docs/v1.md).
 
-**Status: Phase 1, the walking skeleton.** Bridge pairing, Spotify link, the engine worker streaming to Hue, one built-in reactive look ("Pulse"), Now Playing and master controls, and the PC loopback agent.
+**Status: Phase 2, layout.** On top of Phase 1 (bridge pairing, Spotify link, the engine streaming to Hue, Now Playing, master controls, the PC loopback agent): a floor-plan editor with rooms, placed lights, tags, groups and a listening spot that drives the Entertainment area, two spatial looks ("Pulse", "Wave") and group faders.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `apps/server` | Fastify server: auth, Hue pairing, Spotify link and polling, the agent's WebSocket, the live bus, and the 50 Hz engine worker |
-| `apps/web` | React web app (installable): Live and Setup |
+| `apps/web` | React web app (installable): Live, Layout and Setup |
 | `apps/sensor-agent` | PC loopback agent: a Rust capture helper (`native/`, cpal WASAPI loopback) and a Node process that streams audio features |
 | `packages/engine` | Render engine: the Pulse look, master controls, the flash limiter |
 | `packages/audio-features` | DSP: FFT bands, onset strength, onset picking, gain control |
 | `packages/hue` | Hue bridge client: pairing, CLIP v2, Entertainment areas, the DTLS stream |
 | `packages/spotify` | Spotify Web API: PKCE, token refresh, player state, playback clock |
-| `packages/protocol` | Live-bus and agent messages (Zod) |
+| `packages/protocol` | Live-bus and agent messages, and the layout document (Zod) |
 
 npm workspaces; Node 26 runs the TypeScript directly, so only the web app has a build step.
 
@@ -63,7 +63,7 @@ One container image, `ghcr.io/kajgm/musicsync`, built by the **Container image**
 
 What the host must provide (one instance, reach to the bridge on TCP 443 and UDP 2100, a volume at `/data`, a WebSocket-capable HTTPS proxy, no CPU limit) is in [architecture §10](docs/architecture.md#10-deployment).
 
-First run: sign in, then on **Setup** pair the bridge (press its link button when asked), link Spotify, and start the agent with the command Setup shows.
+First run: sign in, then on **Setup** pair the bridge (press its link button when asked), link Spotify, and start the agent with the command Setup shows. Then on **Layout** place the lights on the plan and drag the listening spot to where you sit.
 
 ## The PC agent
 

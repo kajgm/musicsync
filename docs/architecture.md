@@ -370,7 +370,7 @@ Phase 1 swapped or deferred some of these; see [decision 0001](decisions/0001-ph
 ## 9. Data and persistence
 
 - One SQLite file on a persistent volume (`/data/musicsync.db`, WAL mode).
-  - Relational tables hold layout, devices, stages, sensors, settings and assignments.
+  - Relational tables hold devices, sensors, settings and assignments. The layout (floors, rooms, lights, groups, the stage) is one validated document ([decision 0002](decisions/0002-phase-2-layout.md)).
   - JSON document columns (Zod-validated, versioned) hold looks, shows and track analyses, with a version history on every save.
 - **Secrets created at runtime** are the Hue app key and clientkey (from pairing) and the Spotify refresh tokens (from login). They are encrypted in SQLite (AES-256-GCM) with a master key from the environment.
 - **Secrets known at deploy time** come from the environment (§10.2): the master key, the Spotify client ID and the admin password hash. PKCE means there's no Spotify client secret to store.
@@ -437,8 +437,8 @@ Every phase ends in something deployable.
 | Phase | Delivers | Done when |
 |---|---|---|
 | **0. Spikes** (done 2026-11-22, all go: [results](../spikes/README.md)) | Three spikes, detailed below: Hue streaming, the Spotify clock and PC loopback | Go/no-go on `node-dtls-client` and the loopback helper; measured clock error on the PC and the phone, capture latency and onset-detection quality |
-| **1. Walking skeleton** (in progress) | Monorepo, CI, container image and a first deployment. Bridge pairing wizard, Spotify link, engine worker with Hue and simulator outputs, one built-in reactive look, Now Playing and master controls. The loopback agent on your PC | Spotify plays on the PC → the lights react through the deployed app, controlled from the phone |
-| **2. Layout** | Floor/room editor, placing the 7 bulbs, tags, groups, a stage, an app-managed Entertainment area, the Unplaced tray, spatial effects | A new bulb joins sync by placing and tagging it |
+| **1. Walking skeleton** (done 2026-11-24, [decision 0001](decisions/0001-phase-1-skeleton.md)) | Monorepo, CI, container image and a first deployment. Bridge pairing wizard, Spotify link, engine worker with Hue and simulator outputs, one built-in reactive look, Now Playing and master controls. The loopback agent on your PC | Spotify plays on the PC → the lights react through the deployed app, controlled from the phone |
+| **2. Layout** (built 2026-11-24, [decision 0002](decisions/0002-phase-2-layout.md)) | Floor/room editor, placing the 7 bulbs, tags, groups, a stage, an app-managed Entertainment area, the Unplaced tray, spatial effects | A new bulb joins sync by placing and tagging it |
 | **3. Looks** | Effect library, layer stack, signal bindings, per-light response profiles, palettes (album art and OKLCH), look editor with preview, track/playlist → look rules, automatic start/stop for PC playback | One lamp's response can be tuned without touching the others. Playing Spotify on the PC starts the lights by themselves |
 | **4. Beat grids + Spotify-only mode** | Beat tracker, grids learned automatically from PC playback, tap tempo (editor and Live screen), live beats steering the clock on the PC. Spotify-only mode for phone playback: stand-in signals, softened timing, one-tap start, the phone's speaker offset | Beat effects stay locked through quiet passages. A song played from the phone keeps its beat-synced look if it has been played on the PC before |
 | **5. Show editor** | Timeline lanes, clips and automation; beat snapping; transport driven by Spotify (scrubbing seeks the song); floor-plan preview; audition on the real lights; import/export | A song plays its authored show automatically |
@@ -471,9 +471,7 @@ Answered on 2026-11-22 and folded in above: a Bridge Pro with 7 color bulbs, LAN
 
 Phase 0 found that the PC's only audio output is **Digital Audio (HDMI)**, so PC playback goes out through a display or receiver. All Phase 0 results are in [spikes/README.md](../spikes/README.md).
 
-Still open, not blocking:
-
-1. **Room layout.** Are the 7 bulbs (Top/Middle/Bottom Lamp, Top/Middle/Bottom Lantern, Bed Lantern) in the room where you listen, or spread across rooms? This sets the first stage.
+Answered on 2026-11-24: all 7 bulbs are in the room where you listen, so there is one stage ([decision 0002](decisions/0002-phase-2-layout.md)).
 
 Already decided, no action needed: reuse your existing Spotify Client ID. It was created after Feb 2026, so it's already under the new rules (owner Premium, ≤5 users). Add the redirect URIs `http://127.0.0.1:8888/callback` (Phase 0) and the HTTPS one from §10.1 (Phase 1).
 
@@ -493,6 +491,7 @@ Already decided, no action needed: reuse your existing Spotify Client ID. It was
 | D10 | npm workspaces, with Node 26 running the TypeScript directly; only the web app is built ([0001](decisions/0001-phase-1-skeleton.md)) | Accepted |
 | D11 | `node:sqlite` key-value store with encrypted secrets until relational data arrives ([0001](decisions/0001-phase-1-skeleton.md)) | Accepted |
 | D12 | Plain routes plus the WebSocket live bus until the editors need tRPC ([0001](decisions/0001-phase-1-skeleton.md)) | Accepted |
+| D13 | The layout is one versioned document; one stage; the app rewrites its Entertainment area from the plan ([0002](decisions/0002-phase-2-layout.md)) | Accepted |
 
 New or changed decisions each get a short write-up in `docs/decisions/`.
 

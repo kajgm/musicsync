@@ -320,3 +320,157 @@ progress {
   text-align: center;
   overflow-wrap: anywhere;
 }
+
+/* ---- Layout ---- */
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-height: 44px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.field select {
+  grid-column: 2 / 4;
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.stack.small {
+  flex: 1 1 6.5rem;
+}
+
+.row.wrap > .grow {
+  flex: 1 1 10rem;
+}
+
+.plan {
+  width: 100%;
+  max-height: 70vh;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  touch-action: none; /* dragging on a phone moves lights, not the page */
+  user-select: none;
+}
+
+.plan text {
+  font-size: 0.2px;
+  fill: var(--muted);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.plan .grid line {
+  stroke: var(--line);
+  stroke-width: 0.02;
+}
+
+.plan .room polygon {
+  fill: rgba(106, 168, 255, 0.06);
+  stroke: #4a5570;
+  stroke-width: 0.05;
+}
+
+.plan .room.selected polygon {
+  stroke: var(--accent);
+}
+
+.plan .vertex {
+  fill: var(--accent);
+}
+
+.plan .drawing {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 0.05;
+  stroke-dasharray: 0.15 0.1;
+}
+
+.plan .stage circle,
+.plan .stage path {
+  fill: var(--text);
+}
+
+.plan .stage.selected circle {
+  stroke: var(--accent);
+  stroke-width: 0.06;
+}
+
+.plan .light circle:not(.glow) {
+  stroke: #0e0f13;
+  stroke-width: 0.04;
+}
+
+.plan .light.selected circle:not(.glow) {
+  stroke: var(--accent);
+  stroke-width: 0.07;
+}
+
+.plan .light.out {
+  opacity: 0.45;
+}
+
+.plan.editable .light,
+.plan.editable .stage,
+.plan.editable .room polygon,
+.plan.editable .vertex {
+  cursor: grab;
+}
+
+.tray {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.tray li {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.checks {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.checks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.checks input {
+  width: 20px;
+  min-height: 20px;
+  accent-color: var(--accent);
+}
+
+.card.highlight {
+  border-color: var(--accent);
+}
+
+@media (min-width: 900px) {
+  .app:has(main.layout) {
+    max-width: 1000px;
+  }
+}

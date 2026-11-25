@@ -4,7 +4,7 @@
 import { parentPort } from 'node:worker_threads';
 import { Engine } from '@musicsync/engine';
 import { openHueStream, type HueStream } from '@musicsync/hue';
-import type { LiveState, Master } from '@musicsync/protocol';
+import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
 import { now, type FromWorker, type HueTarget, type ToWorker } from './engine-host.ts';
 
 const HZ = 50;
@@ -17,7 +17,10 @@ if (!port) throw new Error('engine-worker.ts runs as a worker thread');
 const post = (msg: FromWorker) => port.postMessage(msg);
 
 let engine = new Engine(SIM_CHANNELS);
-let master: Master = { brightness: 0.8, intensity: 0.8, blackout: false, delayMs: 0 };
+let master: Master = DEFAULT_MASTER;
+let gains: number[] = [];
+/** The engine is rebuilt only when the channel layout changes, so pausing doesn't reset it. */
+let layoutKey = '0';
 let target: HueTarget | null = null;
 let running = false;
 let stream: { session: HueStream; target: HueTarget } | undefined;
@@ -88,15 +91,26 @@ port.on('message', (msg: ToWorker) => {
     case 'master':
       master = msg.master;
       break;
+    case 'gains':
+      gains = msg.gains;
+      engine.setGains(gains);
+      break;
     case 'run':
       running = msg.running;
       void reconcile();
       break;
-    case 'output':
+    case 'output': {
       target = msg.hue;
-      if (msg.channels !== engine.channels) engine = new Engine(msg.channels || SIM_CHANNELS);
+      const key = JSON.stringify(msg.layout);
+      if (key !== layoutKey) {
+        layoutKey = key;
+        const { layout } = msg;
+        engine = new Engine(layout === 0 || (Array.isArray(layout) && layout.length === 0) ? SIM_CHANNELS : layout);
+        engine.setGains(gains);
+      }
       void reconcile();
       break;
+    }
     case 'shutdown':
       running = false;
       void reconcile().finally(() => post({ type: 'stopped' }));

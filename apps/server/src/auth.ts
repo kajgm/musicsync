@@ -21,7 +21,8 @@ export function registerAuth(app: FastifyInstance, config: Config): void {
   let failures: number[] = [];
 
   app.addHook('onRequest', async (req, reply) => {
-    const path = req.url.split('?')[0] ?? '';
+    // The matched route, not the raw URL: the router decodes %-escapes, so /%61pi/x reaches /api/x.
+    const path = req.routeOptions.url ?? '';
     if (path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !isSignedIn(req)) {
       return reply.code(401).send({ error: 'Sign in first' });
     }

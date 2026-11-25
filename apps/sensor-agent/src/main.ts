@@ -115,7 +115,9 @@ function startCapture(): void {
       deviceName = msg.header.device;
       analyzer = new Analyzer(msg.header.sampleRate);
       log(`Capturing "${deviceName}" at ${msg.header.sampleRate} Hz`);
-      if (!socket) connect();
+      // Reconnect so the server hears the new device name (its delay follows the device).
+      if (socket) socket.close();
+      else connect();
     } else if (msg.error || msg.streamError) {
       log(`Capture error: ${msg.error ?? msg.streamError}`);
     }

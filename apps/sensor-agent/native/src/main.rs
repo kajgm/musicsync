@@ -37,7 +37,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let device = match args.iter().position(|a| a == "--device").and_then(|i| args.get(i + 1)) {
+    let device_arg = args.iter().position(|a| a == "--device").and_then(|i| args.get(i + 1));
+    let device = match device_arg {
         Some(needle) => {
             let needle = needle.to_lowercase();
             host.output_devices()?
@@ -57,6 +58,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = mpsc::sync_channel::<Chunk>(256);
     let on_error = |err: cpal::StreamError| {
         eprintln!("{{\"streamError\":\"{}\"}}", json_escape(&err.to_string()));
+        // The stream is dead (e.g. the device went away): exit so the agent starts us again.
+        std::process::exit(2);
     };
 
     let stream = match format {
@@ -83,10 +86,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         other => return Err(format!("unsupported sample format {other:?}").into()),
     };
     drop(tx);
+    let name = device.name().unwrap_or_default();
 
     eprintln!(
         "{{\"header\":{{\"device\":\"{}\",\"sampleRate\":{},\"channels\":{},\"format\":\"{:?}\",\"output\":\"f32le mono\"}}}}",
-        json_escape(&device.name().unwrap_or_default()),
+        json_escape(&name),
         sample_rate,
         channels,
         format
@@ -117,6 +121,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
         if last_report.elapsed() >= Duration::from_secs(2) {
+            // WASAPI keeps capturing the device we opened, so follow a new default by restarting.
+            if device_arg.is_none() {
+                if let Some(now) = host.default_output_device().and_then(|d| d.name().ok()) {
+                    if now != name {
+                        eprintln!("default output device changed to \"{now}\"; restarting");
+                        return Ok(());
+                    }
+                }
+            }
             let n = callbacks.max(1) as f64;
             eprintln!(
                 "{{\"stats\":{{\"callbacks\":{},\"framesPerCallback\":{:.0},\"captureToCallbackMsAvg\":{:.2},\"captureToCallbackMsMax\":{:.2}}}}}",

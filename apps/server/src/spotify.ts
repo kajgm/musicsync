@@ -35,6 +35,7 @@ export class SpotifyModule {
   private readonly logins = new Map<string, { verifier: string; expires: number }>();
   private readonly clock = new PlaybackClock();
   private tokens: Tokens | undefined;
+  private refreshing: Promise<Tokens> | undefined;
   private timer: NodeJS.Timeout | undefined;
   /** Playlist URI → name (undefined: Spotify wouldn't say). */
   private readonly playlistNames = new Map<string, string | undefined>();
@@ -124,9 +125,18 @@ export class SpotifyModule {
     const clientId = this.config.spotifyClientId;
     if (!tokens || !clientId) throw new Error('Spotify is not linked');
     if (Date.now() < tokens.expiresAt - 60_000) return tokens.accessToken;
-    this.tokens = await refreshTokens(clientId, tokens.refreshToken);
-    this.store.setSecret('spotify', this.tokens); // Spotify may have rotated the refresh token
-    return this.tokens.accessToken;
+    // One refresh at a time: a second one with the same refresh token can fail once Spotify
+    // has rotated it, and poll() then unlinks the account.
+    this.refreshing ??= refreshTokens(clientId, tokens.refreshToken)
+      .then((fresh) => {
+        this.tokens = fresh;
+        this.store.setSecret('spotify', fresh); // Spotify may have rotated the refresh token
+        return fresh;
+      })
+      .finally(() => {
+        this.refreshing = undefined;
+      });
+    return (await this.refreshing).accessToken;
   }
 
   private async poll(): Promise<void> {

@@ -34,7 +34,7 @@ Put it behind an HTTPS reverse proxy that passes WebSockets through, at `/` with
 | Setting | Contents |
 |---|---|
 | `MUSICSYNC_MASTER_KEY` | 32 random bytes as hex. Encrypts the Hue keys and Spotify tokens in the database, and signs sessions. Keep it: a new key means pairing and linking again |
-| `ADMIN_PASSWORD_HASH` | bcrypt hash of the household password: `npm run hash-password` in a checkout, or any bcrypt tool |
+| `ADMIN_PASSWORD_HASH` | bcrypt hash of the household password: `npm run hash-password` in a checkout, or any bcrypt tool. Changing it signs out every device (for a lost phone) |
 | `SPOTIFY_CLIENT_ID` | Your Spotify app's client ID (PKCE, so no client secret) |
 | `PUBLIC_URL` | The HTTPS URL clients use. Add `<PUBLIC_URL>/api/auth/spotify/callback` to your Spotify app's redirect URIs |
 | `PORT`, `DATA_DIR` | `3000` and `/data` in the image |

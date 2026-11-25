@@ -24,7 +24,8 @@ import { Store } from './store.ts';
 const config = loadConfig();
 const store = new Store(config.dataDir, config.masterKey);
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, bodyLimit: 64 * 1024 });
-await app.register(cookie, { secret: createHmac('sha256', config.masterKey).update('session-cookie').digest() });
+// Signed with the password hash too, so changing the password signs out every device.
+await app.register(cookie, { secret: createHmac('sha256', config.masterKey).update(`session-cookie:${config.adminPasswordHash}`).digest() });
 await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
 registerAuth(app, config);
 app.get('/healthz', async () => ({ ok: true, version: config.version }));

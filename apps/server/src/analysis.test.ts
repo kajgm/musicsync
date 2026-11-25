@@ -7,10 +7,10 @@ const state = (s: Partial<LiveState>) => ({ mode: 'idle', agent: { connected: fa
 
 describe('delayKey', () => {
   it('follows the PC while it plays there, and the Spotify device otherwise', () => {
-    const pc = { connected: true, device: 'HDMI' };
-    expect(delayKey(state({ mode: 'full', agent: pc }), last).key).toBe('pc:HDMI');
-    const phone = { playing: true, device: { name: 'iPhone', type: 'Smartphone' } } as LiveState['spotify'];
-    expect(delayKey(state({ mode: 'spotify-only', agent: pc, spotify: phone }), last)).toEqual({ key: 'spotify:iPhone', label: 'iPhone' });
+    const pc = { connected: true, device: 'Speakers' };
+    expect(delayKey(state({ mode: 'full', agent: pc }), last).key).toBe('pc:Speakers');
+    const phone = { playing: true, device: { name: 'Phone', type: 'Smartphone' } } as LiveState['spotify'];
+    expect(delayKey(state({ mode: 'spotify-only', agent: pc, spotify: phone }), last)).toEqual({ key: 'spotify:Phone', label: 'Phone' });
   });
 
   it('keeps the last device when nothing plays', () => {

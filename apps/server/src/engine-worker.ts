@@ -5,12 +5,11 @@ import { parentPort } from 'node:worker_threads';
 import { Engine, type BeatClock, type Program, type TrackClock } from '@musicsync/engine';
 import { openHueStream, type HueStream } from '@musicsync/hue';
 import { DEFAULT_MASTER, type LiveState, type Master } from '@musicsync/protocol';
-import { now, type FromWorker, type HueTarget, type ToWorker } from './engine-host.ts';
+import { SIM_CHANNELS, now, type FromWorker, type HueTarget, type ToWorker } from './engine-host.ts';
 
 const HZ = 50;
 const PREVIEW_EVERY = 2; // 25 Hz preview
 const RETRY_MS = 5000;
-const SIM_CHANNELS = 7; // preview-only lights until a bridge is paired
 
 const port = parentPort;
 if (!port) throw new Error('engine-worker.ts runs as a worker thread');

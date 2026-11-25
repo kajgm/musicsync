@@ -18,7 +18,7 @@ Phase 1 builds the thinnest version of each piece that still works end to end. W
 
 - **ESLint.** typescript-eslint 8.x supports TypeScript below 6.1 and the repo uses TypeScript 7. CI runs typecheck and tests. Add it when typescript-eslint supports TypeScript 7; `no-floating-promises` matters for the long-running server.
 - **`packages/core` and `packages/color`.** Nothing to put in them yet. The Hue stream uses its RGB colour space and the bridge maps colours into each bulb's gamut; the xy + gamut pipeline comes with palettes (Phase 3).
-- **Per-device light delay.** One `delayMs` setting. The PC has one output (HDMI); offsets per output device come in Phase 4.
+- **Per-device light delay.** One `delayMs` setting; offsets per output device come in Phase 4.
 - `/metrics`, nightly `VACUUM INTO` backups, bridge discovery (you type the IP), automatic start and stop (Phase 3), Spotify-only stand-in signals (Phase 4), Playwright.
 
 ## Decided along the way

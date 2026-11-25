@@ -1,8 +1,7 @@
-# musicsync v2 — Architecture
+# musicsync — Architecture
 
-> **Status:** Proposed · 2026-11-22 (updated the same day: your setup answers, then PC loopback instead of a room microphone)
-> **Replaces:** v1 (`main.py`: a single-file Python/customtkinter desktop app for Ubuntu)
-> **Scope:** high-level design, technology choices and the build plan. Decisions are expected to be revisited. Record changes in the [decision log](#16-decision-log).
+> **Status:** Implemented through Phase 5 of the [roadmap](#13-roadmap). Where the build differs from this design, the [decision log](#16-decision-log) and [`docs/decisions/`](decisions/) say so.
+> **Scope:** high-level design, technology choices and the build plan.
 
 ## 1. Summary
 
@@ -15,13 +14,13 @@
   - When Spotify plays on your PC, a **loopback agent** there captures the PC's own audio output and says what it *sounds like* right now. There is no microphone anywhere.
   - A per-track **beat grid**, learned automatically from PC playback or tapped in, says where the beats *will* be. Grids also carry phone playback, which has no live audio (§5.5).
 
-### Your setup (answered 2026-11-22) and what it decides
+### Assumptions and what they decide
 
-| Fact | Decides |
+| Assumption | Decides |
 |---|---|
-| **Hue Bridge Pro** (`BSB003`), API 1.78.0. It still answers the v1 `/api` endpoint. | One bridge, and standard link-button pairing works. Give it a fixed IP. |
-| **7 Hue White and Color Ambiance 60W bulbs**, one channel each. | All 7 fit in one Entertainment area (limit 10), and one stage covers them. No second bridge or REST slow path for now. |
-| **No microphone in the room.** Spotify plays either on your PC (in practice the web player in Firefox; the desktop app works the same), or from your iPhone into a Bluetooth speaker. | Two modes. **Full mode** (Spotify on the PC): a loopback agent captures the PC's audio output before it reaches the speaker, giving full reactivity and automatic beat grids (§5.3–5.4). **Spotify-only mode** (phone): Spotify's playback position plus the grids already learned on the PC, with no live reaction to sound (§5.5). |
+| **One Hue bridge with Entertainment support** (Hue Bridge v2 or Bridge Pro), reachable from the server. | Standard link-button pairing. Give the bridge a fixed IP. |
+| **Colour-capable Hue lights, up to 10 in the synced set.** | They fit one Entertainment area (Hue's limit is 10), so one stage covers them. More lights, or lights that can't stream, need the REST slow path or a second bridge (later). |
+| **No microphone.** Spotify plays either on a Windows PC (desktop app or web player), or on another device such as a phone with a Bluetooth speaker. | Two modes. **Full mode** (Spotify on the PC): a loopback agent captures the PC's audio output before it reaches the speaker, giving full reactivity and automatic beat grids (§5.3–5.4). **Spotify-only mode** (phone): Spotify's playback position plus the grids already learned on the PC, with no live reaction to sound (§5.5). |
 | Phones reach the app directly on the LAN. | The host needs an HTTPS name that phones can resolve (§10.1). |
 
 ## 2. Platform constraints that shape the design
@@ -34,7 +33,7 @@
 | Spotify `audio-analysis` and `audio-features` are closed to apps without extended quota granted before Nov 2024. | No beats or sections from Spotify. Beat data comes from PC loopback plus learned or tapped beat grids (§5.3–5.4). |
 | Spotify Development Mode (Feb 2026): the app owner needs Premium, ≤5 authorized users, reduced endpoint list. The Player endpoints (`GET /me/player`, seek, play/pause, transfer, devices) and `GET /tracks/{id}` (including `external_ids`/ISRC) remain. | Fine for one household. The design depends only on the Player and Track endpoints, not on any of the ones Spotify keeps cutting. |
 | Playback position is available only by polling. | A **playback clock** estimates the position between polls, smooths out drift, detects seeks and applies per-device latency offsets (§5.2). |
-| Spotify redirect URIs must be HTTPS, except loopback IP literals. `localhost` and the implicit grant have been rejected since 27 Nov 2025. | The app needs a real HTTPS hostname. v1's `http://localhost:8888/callback` no longer works. |
+| Spotify redirect URIs must be HTTPS, except loopback IP literals. `localhost` and the implicit grant have been rejected since 27 Nov 2025. | The app needs a real HTTPS hostname. |
 | Browsers can't capture other apps' audio (Chrome's screen share with "share system audio" on Windows is the one clumsy exception), and Node has no system-audio capture of its own. Service workers and PWA install need HTTPS. | Capturing the PC's output needs a small native helper (§5.3). Serve over HTTPS with a certificate the phones trust. |
 | Node.js 26 has an experimental `node:dtls`, but only in Node builds compiled with `--experimental-dtls`. | Use `node-dtls-client` (a DTLS client written in TypeScript, supports pre-shared keys, already used by existing Node Hue-streaming projects) behind a transport interface, and swap later. |
 
@@ -44,10 +43,10 @@
 flowchart LR
   subgraph house["Home network"]
     phone["Phone<br/>live control PWA · Spotify-only playback"]
-    pc["Your PC<br/>Spotify web player · editors (PWA)"]
+    pc["PC<br/>Spotify · editors (PWA)"]
     agent["Loopback agent on the PC<br/>features only, no audio"]
     speaker["Speaker"]
-    bridge["Hue Bridge Pro"]
+    bridge["Hue bridge"]
     lights(("7 color bulbs"))
   end
   subgraph host["Any server host on the network"]
@@ -172,14 +171,14 @@ flowchart LR
 
 - Runs in a worker thread at a fixed 50 Hz (configurable). Each tick renders for a *time*, not a frame count, so scheduling jitter shifts a frame by a few ms but never accumulates.
 - The control plane **prepares** each program before handing it over. Selectors become channel index lists, positions are normalized, automation is pre-sampled and buffers are preallocated. Each tick then allocates no memory, and live tweaks are sent as small patches.
-- Colors stay in linear floating-point RGB through the layers and compositing. Each output converts per channel to the device's color range. For Hue that is CIE xy + brightness, using gamut A/B/C from the light's API data, which replaces v1's direct sRGB → xy conversion.
+- Colors stay in linear floating-point RGB through the layers and compositing. Each output converts per channel to the device's color range. For Hue that is CIE xy + brightness, using gamut A/B/C from the light's API data.
 - Program changes (track change, look switch) crossfade, 500 ms by default.
 - Statistics (frame time, jitter, dropped frames, stream state) and preview frames (~30 Hz) go back to the control plane for the UI and `/metrics`.
 
 ### 5.2 Playback clock
 
 - Polls `GET /me/player` about once a second while playing. It polls faster near the end of a track to catch the change, slower when paused, and waits when Spotify returns `429 Retry-After`.
-- Each sample is timed at send time plus half the *smallest* recent round trip, not at the request's midpoint, and samples with slow round trips count less. Phase 0 showed why: on a slow request most of the extra delay comes after Spotify reads the position, so midpoint timing roughly doubled the apparent error. With round-trip-aware timing the reported position was steady to a p95 of 26 ms on the iPhone and 33 ms on the PC.
+- Each sample is timed at send time plus half the *smallest* recent round trip, not at the request's midpoint, and samples with slow round trips count less. Phase 0 showed why: on a slow request most of the extra delay comes after Spotify reads the position, so midpoint timing roughly doubled the apparent error. With round-trip-aware timing the reported position was steady to about 30 ms at p95, on a phone and on a PC.
 - Position = sample + elapsed time. Small errors are blended out over 1–2 s so nothing visibly jumps; big ones (seek, skip, pause, track change) reset immediately.
 - **Latency compensation:** frames render for `position + offset`, where offset = light latency − audio output latency. Without a microphone nothing can *measure* how long the speaker takes, so you set each offset once by ear with a nudge slider, and it's stored per output:
   - **On the PC**, the agent reports the active Windows output device, so switching between the speaker and headphones switches the offset automatically. Loopback hears the audio before the speaker does, so only the speaker's own delay needs offsetting (Bluetooth roughly 150–300 ms, wired far less).
@@ -195,7 +194,7 @@ flowchart LR
 | None: Spotify-only | Phone playback, or whenever the agent isn't running | See §5.5. |
 | Capture only Spotify's process (Windows process-loopback API, Windows 10 build 20348+) | Later refinement | Stops notification sounds and videos from moving the lights. Needs direct WASAPI calls instead of `cpal`. With the web player the process is the whole browser, so the desktop app isolates better. |
 | Chrome screen share with "share system audio" | Stopgap | Works in a browser tab without native code, but asks for permission every session. |
-| Linux PulseAudio/PipeWire monitor | If music ever plays from a Linux machine | The same helper; this is what v1 did on Ubuntu. |
+| Linux PulseAudio/PipeWire monitor | If music ever plays from a Linux machine | The same helper. |
 
 - **Why a native helper:** Node can't capture system audio by itself. The helper only moves PCM (about 100 lines, no logic), so all DSP stays in TypeScript, where tests can reach it.
 - The agent computes features locally: a windowed FFT into log-spaced frequency bands, loudness (RMS), and onset strength (how sharply the spectrum changes). It sends ~60–100 small frames/s over WSS. Audio is analyzed in memory only; nothing is recorded or stored.
@@ -394,7 +393,7 @@ The app ships as one container image and assumes nothing about where it runs: a 
 | **No CPU throttling** (on Kubernetes: a CPU request but no CPU limit) | Throttling stalls the 50 Hz render loop, which shows up as stutter |
 | **Reach from the PC running the loopback agent** | It streams audio features to the server over WSS |
 
-The server can sit on a different subnet from the bridge, as long as routing and firewalls let it open the two bridge ports. Bridge discovery over mDNS only works on the same subnet, so the setup wizard also accepts a bridge IP. Verify the bridge certificate against Philips Hue's `root-bridge` CA, with CN = the bridge ID (v1 used `verify=False`).
+The server can sit on a different subnet from the bridge, as long as routing and firewalls let it open the two bridge ports. Bridge discovery over mDNS only works on the same subnet, so the setup wizard also accepts a bridge IP. Verify the bridge certificate against Philips Hue's `root-bridge` CA, with CN = the bridge ID.
 
 ### 10.2 Configuration
 
@@ -436,25 +435,25 @@ Every phase ends in something deployable.
 
 | Phase | Delivers | Done when |
 |---|---|---|
-| **0. Spikes** (done 2026-11-22, all go: [results](../spikes/README.md)) | Three spikes, detailed below: Hue streaming, the Spotify clock and PC loopback | Go/no-go on `node-dtls-client` and the loopback helper; measured clock error on the PC and the phone, capture latency and onset-detection quality |
+| **0. Spikes** (done 2026-11-22, all go) | Three spikes, detailed below: Hue streaming, the Spotify clock and PC loopback | Go/no-go on `node-dtls-client` and the loopback helper; measured clock error on the PC and the phone, capture latency and onset-detection quality |
 | **1. Walking skeleton** (done 2026-11-24, [decision 0001](decisions/0001-phase-1-skeleton.md)) | Monorepo, CI, container image and a first deployment. Bridge pairing wizard, Spotify link, engine worker with Hue and simulator outputs, one built-in reactive look, Now Playing and master controls. The loopback agent on your PC | Spotify plays on the PC → the lights react through the deployed app, controlled from the phone |
-| **2. Layout** (done 2026-11-25, [decision 0002](decisions/0002-phase-2-layout.md)) | Floor/room editor, placing the 7 bulbs, tags, groups, a stage, an app-managed Entertainment area, the Unplaced tray, spatial effects | A new bulb joins sync by placing and tagging it |
-| **3. Looks** (built 2026-11-25, [decision 0003](decisions/0003-phase-3-looks.md)) | Effect library, layer stack, signal bindings, per-light response profiles, palettes (album art and OKLCH), look editor with preview, track/playlist → look rules, automatic start/stop for PC playback | One lamp's response can be tuned without touching the others. Playing Spotify on the PC starts the lights by themselves |
-| **4. Beat grids + Spotify-only mode** (built 2026-11-25, [decision 0004](decisions/0004-phase-4-beats.md)) | Beat tracker, grids learned automatically from PC playback, tap tempo (editor and Live screen), live beats steering the clock on the PC. Spotify-only mode for phone playback: stand-in signals, softened timing, one-tap start, the phone's speaker offset | Beat effects stay locked through quiet passages. A song played from the phone keeps its beat-synced look if it has been played on the PC before |
-| **5. Show editor** (built 2026-11-25, [decision 0005](decisions/0005-phase-5-shows.md)) | Timeline lanes, clips and automation; beat snapping; transport driven by Spotify (scrubbing seeks the song); floor-plan preview; audition on the real lights; import/export | A song plays its authored show automatically |
+| **2. Layout** (done 2026-11-25, [decision 0002](decisions/0002-phase-2-layout.md)) | Floor/room editor, placing the lights, tags, groups, a stage, an app-managed Entertainment area, the Unplaced tray, spatial effects | A new bulb joins sync by placing and tagging it |
+| **3. Looks** (done 2026-11-25, [decision 0003](decisions/0003-phase-3-looks.md)) | Effect library, layer stack, signal bindings, per-light response profiles, palettes (album art and OKLCH), look editor with preview, track/playlist → look rules, automatic start/stop for PC playback | One lamp's response can be tuned without touching the others. Playing Spotify on the PC starts the lights by themselves |
+| **4. Beat grids + Spotify-only mode** (done 2026-11-25, [decision 0004](decisions/0004-phase-4-beats.md)) | Beat tracker, grids learned automatically from PC playback, tap tempo (editor and Live screen), live beats steering the clock on the PC. Spotify-only mode for phone playback: stand-in signals, softened timing, one-tap start, the phone's speaker offset | Beat effects stay locked through quiet passages. A song played from the phone keeps its beat-synced look if it has been played on the PC before |
+| **5. Show editor** (done 2026-11-25, [decision 0005](decisions/0005-phase-5-shows.md)) | Timeline lanes, clips and automation; beat snapping; transport driven by Spotify (scrubbing seeks the song); floor-plan preview; audition on the real lights; import/export | A song plays its authored show automatically |
 | **Later** | Remote access, capturing only Spotify's process, Linux capture, MIDI/Stream Deck control, Home Assistant hooks, Claude-drafted shows from a track's sections, other brands (WLED, Nanoleaf, LIFX). Past 10 lights, or with bulbs that aren't color-capable: the REST slow path or a second bridge | — |
 
-**Phase 0 detail.** All three spikes run on your PC, which shares the house LAN with the bridge, so they need no network changes:
+**Phase 0 detail.** Three throwaway spikes on a PC on the bridge's network, since removed from the repo; their results are folded into this document:
 
-1. **Hue:** pair with the Bridge Pro (you press the link button), create an Entertainment area from the 7 bulbs via CLIP v2, and stream a 50 Hz test pattern with `node-dtls-client`.
-2. **Spotify:** PKCE login with a loopback redirect (`http://127.0.0.1:8888/callback`, which Spotify still allows), with Spotify playing first on the PC, then on the phone. Log the playback clock's error for each.
-3. **PC audio:** a Rust `cpal` loopback helper piping PCM into a Node DSP prototype while Spotify plays on the PC. Check onset and beat detection and the capture latency, and set the speaker offset by ear. If the helper fights us, the spike falls back to Chrome's screen share with system audio.
+1. **Hue:** pair (link button), create an Entertainment area via CLIP v2 and stream a 50 Hz test pattern with `node-dtls-client`. Result: a 13 ms handshake, 50 Hz with no errors.
+2. **Spotify:** PKCE login with a loopback redirect, and the playback clock's error with Spotify playing on a PC and on a phone. Result: steady to about 30 ms at p95 with round-trip-aware timing (§5.2).
+3. **PC audio:** a Rust `cpal` loopback helper piping PCM into a Node DSP prototype. Result: works; onsets are detected about 20 ms after capture.
 
 ## 14. Risks
 
 | Risk | Mitigation |
 |---|---|
-| `node-dtls-client` breaks with a future bridge firmware | Phase 0 confirmed it works today on the Bridge Pro (13 ms handshake, 50 Hz, 0 errors). The transport sits behind an interface. Fallbacks: `node:dtls` once standard builds include it, or a small sidecar built on OpenSSL or Go `pion/dtls` (check that it supports the PSK-GCM suite) |
+| `node-dtls-client` breaks with a future bridge firmware | Phase 0 confirmed it works on a Hue Bridge Pro (13 ms handshake, 50 Hz, 0 errors). The transport sits behind an interface. Fallbacks: `node:dtls` once standard builds include it, or a small sidecar built on OpenSSL or Go `pion/dtls` (check that it supports the PSK-GCM suite) |
 | The Spotify position or device latency feels off | Round-trip-aware clock (Phase 0: steady to about 30 ms at p95), per-output offsets, live beats steering the clock on the PC; err early |
 | Spotify removes more endpoints | Only the Player and Track endpoints are used, behind the `MusicSource` interface. Analysis never depends on Spotify |
 | Without a microphone, speaker delay can't be measured | Set once by ear per output device. On the PC the agent reports the output device, so the right offset is picked automatically |
@@ -467,24 +466,18 @@ Every phase ends in something deployable.
 
 ## 15. Open questions
 
-Answered on 2026-11-22 and folded in above: a Bridge Pro with 7 color bulbs, LAN access for phones, and no microphone. Music plays from Spotify on the PC (full mode; in practice the web player in Firefox) or from the iPhone into a Bluetooth speaker (Spotify-only mode).
-
-Phase 0 found that the PC's only audio output is **Digital Audio (HDMI)**, so PC playback goes out through a display or receiver. All Phase 0 results are in [spikes/README.md](../spikes/README.md).
-
-Answered on 2026-11-24: all 7 bulbs are in the room where you listen, so there is one stage ([decision 0002](decisions/0002-phase-2-layout.md)).
-
-Already decided, no action needed: reuse your existing Spotify Client ID. It was created after Feb 2026, so it's already under the new rules (owner Premium, ≤5 users). Add the redirect URIs `http://127.0.0.1:8888/callback` (Phase 0) and the HTTPS one from §10.1 (Phase 1).
+None at the moment. Questions answered while building are folded into the sections above and the [decision records](decisions/).
 
 ## 16. Decision log
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Self-hosted server with PWA clients (not a desktop app, not cloud-hosted) | Proposed |
-| D2 | TypeScript monorepo; the engine runs on both server and browser | Proposed |
-| D3 | Entertainment stream for music-speed output; REST only for slow layers | Proposed |
-| D4 | Lights addressed by layout and tags; the app manages Entertainment areas | Proposed |
+| D1 | Self-hosted server with PWA clients (not a desktop app, not cloud-hosted) | Accepted |
+| D2 | TypeScript monorepo; the engine runs on both server and browser | Accepted |
+| D3 | Entertainment stream for music-speed output; REST only for slow layers | Accepted |
+| D4 | Lights addressed by layout and tags; the app manages Entertainment areas | Accepted |
 | D5 | Beat data from PC loopback and beat grids, never from Spotify | Accepted |
-| D6 | SQLite with versioned JSON documents | Proposed |
+| D6 | SQLite with versioned JSON documents | Accepted |
 | D7 | One container image, deployment-agnostic (one instance, no CPU throttling) | Accepted |
 | D8 | No microphone. PC loopback is the only live audio source; phone playback runs in Spotify-only mode on learned grids | Accepted |
 | D9 | Phones reach the app on the LAN, not through a public tunnel | Accepted |
@@ -497,21 +490,6 @@ Already decided, no action needed: reuse your existing Spotify Client ID. It was
 | D16 | Shows: one document per track, clips with times that follow the beat grid when snapped, keyframe automation, Spotify as the transport ([0005](decisions/0005-phase-5-shows.md)) | Accepted |
 
 New or changed decisions each get a short write-up in `docs/decisions/`.
-
-## 17. What changes from v1
-
-| v1 | v2 |
-|---|---|
-| One file; a global `STATE` dict shared across threads | Modules and packages with typed interfaces; the engine is isolated in a worker |
-| Desktop GUI on the machine playing the music | Headless server; a PWA on any device |
-| Loopback capture inside the GUI process, Ubuntu only | Loopback capture in a small agent on the PC that feeds the server; phone playback still works in Spotify-only mode |
-| Lights mapped to Entertainment channels by list position, though v1 light IDs don't follow channel order, and lights outside the area got channels too | Explicit fixture → channel mapping read from the v2 Entertainment area |
-| Only the first Entertainment area, made by hand in the Hue app | Areas created and positioned by the app from your layout |
-| Raw FFT size per light's frequency range, one global smoothing value | Bands, onsets and beats; per-channel response profiles; signal bindings |
-| Color × intensity in RGB; sRGB → xy without gamut handling | Perceptual color pipeline with per-light gamut mapping |
-| Settings lost on restart | SQLite plus export/import |
-| Bridge HTTPS with `verify=False` | Verified against Signify's CA and the bridge ID |
-| Spotify used only for album art (polled every 4 s) | Spotify drives track identity, timing and automatic start/stop; album-art palettes stay as one palette source |
 
 ## References
 

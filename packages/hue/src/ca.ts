@@ -1,6 +1,6 @@
 // Philips Hue's private root CAs. Bridges present a certificate issued by one of them
-// with CN = the bridge ID. "root-bridge" signs the Bridge Pro's certificate (checked
-// against the bridge on 2026-11-23); "Hue Root CA 01" (Signify, 2025) is the newer root.
+// with CN = the bridge ID. "root-bridge" signs current bridges' certificates (checked
+// against a Hue Bridge Pro); "Hue Root CA 01" (Signify, 2025) is the newer root.
 // Copied from openHAB's Hue binding (huebridge_cacert.pem).
 export const HUE_ROOT_CAS = [
   // C=NL, O=Philips Hue, CN=root-bridge · 2017-01-01 – 2038-01-19

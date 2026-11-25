@@ -2,7 +2,7 @@
 
 **Status:** Accepted · 2026-11-24
 
-All 7 bulbs are in the room where you listen (open question 1, answered 2026-11-24), so Phase 2 has one stage.
+Phase 2 assumes the synced lights share one listening space, so it has one stage.
 
 ## Changed
 

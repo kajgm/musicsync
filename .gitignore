@@ -1,7 +1,6 @@
 .env
-.cache
-
-venv/
+# Local-only files (credentials, recordings) next to code
+.local/
 
 node_modules/
 target/
@@ -12,4 +11,3 @@ dist/
 # Local server data (SQLite) in development
 .data/
 
-spikes/.local/

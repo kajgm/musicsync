@@ -34,6 +34,9 @@ export type FromWorker =
   | { type: 'status'; status: LiveState['output'] }
   | { type: 'stopped' };
 
+/** Preview-only lights the engine renders until a bridge is paired (any number works). */
+export const SIM_CHANNELS = 6;
+
 /** Epoch ms with sub-ms resolution, consistent across threads. */
 export const now = () => performance.timeOrigin + performance.now();
 

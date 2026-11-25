@@ -4,14 +4,13 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { DEFAULT_PROFILE, oklchToOklab, type Profile, type Program, type ProgramLayer } from '@musicsync/engine';
 import type { Layout, LiveState, Look, Oklch, ProfilePatch, Show, Target, TimePos } from '@musicsync/protocol';
-import type { EngineHost } from './engine-host.ts';
+import { SIM_CHANNELS, type EngineHost } from './engine-host.ts';
 import type { Live } from './live.ts';
 import { albumPalette } from './palette.ts';
 import type { Shows } from './shows.ts';
 
 /** Auto-started lights stop this long after the music pauses. */
 const STOP_AFTER_MS = 15_000;
-const SIM_CHANNELS = 7;
 
 type Reason = LiveState['program']['reason'];
 

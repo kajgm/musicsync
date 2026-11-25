@@ -8,19 +8,19 @@ const layout: Layout = {
   ...EMPTY_LAYOUT,
   fixtures: [
     { id: 'lamp', floorId: 'f1', x: 1, y: 1, z: 1, tags: ['lamp'], response: { sensitivity: 0.5, band: 'mid' } },
-    { id: 'lantern', floorId: 'f1', x: 3, y: 1, z: 1, tags: ['lantern'] },
+    { id: 'strip', floorId: 'f1', x: 3, y: 1, z: 1, tags: ['strip'] },
   ],
-  groups: [{ id: 'g', name: 'Bedside', fixtureIds: ['lantern'], response: { latencyMs: 40 } }],
+  groups: [{ id: 'g', name: 'Shelf', fixtureIds: ['strip'], response: { latencyMs: 40 } }],
 };
 const pulse = BUILTIN_LOOKS[0];
 
 describe('resolveProfile', () => {
   it('layers the light’s own, its groups’ and the look’s settings over the defaults', () => {
     expect(resolveProfile('lamp', layout, pulse)).toMatchObject({ sensitivity: 0.5, band: 'mid', latencyMs: 0, max: 1 });
-    expect(resolveProfile('lantern', layout, pulse)).toMatchObject({ sensitivity: 1, latencyMs: 40 });
+    expect(resolveProfile('strip', layout, pulse)).toMatchObject({ sensitivity: 1, latencyMs: 40 });
     const look = { ...pulse, overrides: [{ target: { tags: ['lamp'], groups: [], fixtures: [] }, response: { sensitivity: 2 } }] };
     expect(resolveProfile('lamp', layout, look).sensitivity).toBe(2);
-    expect(resolveProfile('lantern', layout, look).sensitivity).toBe(1);
+    expect(resolveProfile('strip', layout, look).sensitivity).toBe(1);
   });
 });
 
@@ -34,7 +34,7 @@ describe('compileLook', () => {
         { ...pulse.layers[1], id: 'off', enabled: false },
       ],
     };
-    const program = compileLook(look, layout, ['lantern', 'lamp', undefined], pulse.palette.colors, 'k');
+    const program = compileLook(look, layout, ['strip', 'lamp', undefined], pulse.palette.colors, 'k');
     expect(program.layers.map((l) => l.channels)).toEqual([[1], [0]]);
     expect(program.profiles[1].band).toBe('mid');
   });
@@ -75,7 +75,7 @@ describe('compileShow', () => {
   };
 
   it('turns clips into windowed, automated layers on their lane’s lights', () => {
-    const program = compileShow(show, undefined, layout, ['lantern', 'lamp'], pulse.palette.colors, undefined, 'k');
+    const program = compileShow(show, undefined, layout, ['strip', 'lamp'], pulse.palette.colors, undefined, 'k');
     expect(program.layers).toHaveLength(1);
     const [clip] = program.layers;
     expect(clip.channels).toEqual([1]);
@@ -85,7 +85,7 @@ describe('compileShow', () => {
   });
 
   it('places beat-snapped times on the grid, with the bed look underneath', () => {
-    const program = compileShow(show, pulse, layout, ['lantern', 'lamp'], pulse.palette.colors, { periodMs: 500, offsetMs: 120 }, 'k');
+    const program = compileShow(show, pulse, layout, ['strip', 'lamp'], pulse.palette.colors, { periodMs: 500, offsetMs: 120 }, 'k');
     expect(program.layers.map((l) => l.effect)).toEqual(['wash', 'flash', 'solid']);
     expect(program.layers[2].window?.startMs).toBe(120 + 4 * 500);
   });

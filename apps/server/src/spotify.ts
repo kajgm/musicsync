@@ -137,12 +137,25 @@ export class SpotifyModule {
         this.tokens = { ...this.tokens, expiresAt: 0 }; // refresh on the next poll
         next = 1000;
       } else if (reply.status === 429) {
-        next = (reply.retryAfterS ?? 5) * 1000;
+        const waitS = reply.retryAfterS ?? 5;
+        next = waitS * 1000;
+        // A long wait means the Spotify app's quota is used up: show it, don't look idle.
+        if (waitS > 60) {
+          const until = new Date(now() + next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          this.log.warn({ retryAfterS: waitS }, 'Spotify rate limit');
+          this.patch({ playing: false, error: `Spotify is rate-limiting musicsync until about ${until}; the lights can’t follow the music until then.` });
+        }
       } else if (reply.status === 200 && reply.state) {
         next = reply.state.is_playing ? POLL_PLAYING_MS : POLL_IDLE_MS;
         this.update(reply.state, reply.sentAt, reply.receivedAt);
-      } else {
+      } else if (reply.status === 204) {
+        // 204: no active device on this account.
         this.patch({ playing: false, device: undefined, track: undefined, context: undefined, progressMs: undefined, at: undefined, error: undefined });
+      } else {
+        // Anything else (403, 5xx…) is a problem, not silence: say so instead of showing "nothing playing".
+        this.log.warn({ status: reply.status }, 'Spotify player request refused');
+        this.patch({ playing: false, device: undefined, track: undefined, context: undefined, progressMs: undefined, at: undefined, error: `Spotify’s player answered HTTP ${reply.status}` });
+        next = POLL_ERROR_MS;
       }
     } catch (err) {
       const message = (err as Error).message;
